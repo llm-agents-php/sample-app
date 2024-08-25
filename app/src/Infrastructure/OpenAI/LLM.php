@@ -64,7 +64,6 @@ final class LLM implements LLMInterface
             );
         }
 
-        dump($request);
         $stream = $this
             ->client
             ->chat()

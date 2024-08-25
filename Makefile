@@ -1,5 +1,6 @@
 init: init-db init-rr
 
+# Install dolt database
 init-db:
 	if [ ! -f "dolt" ]; then \
 		vendor/bin/dload get dolt;\
@@ -12,6 +13,7 @@ init-db:
 		./dolt --data-dir=.db sql -q "create database llm;"; \
 	fi
 
+# Install RoadRunner
 init-rr:
 	if [ ! -f "rr" ]; then \
 		vendor/bin/rr get;\
