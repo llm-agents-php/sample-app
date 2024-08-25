@@ -1,0 +1,64 @@
+{
+    "name": "llm-agents/app",
+    "type": "project",
+    "license": "MIT",
+    "description": "Lang chain service",
+    "require": {
+        "php": ">=8.2",
+        "ext-mbstring": "*",
+        "ext-sockets": "*",
+        "cycle/entity-behavior": "^1.2",
+        "guzzlehttp/guzzle": "^7.0",
+        "internal/dload": "^0.2.2",
+        "llm-agents/agents": "dev-master",
+        "nesbot/carbon": "^3.4",
+        "nyholm/psr7": "^1.8",
+        "openai-php/client": "^0.10.1",
+        "spiral-packages/league-event": "^1.0",
+        "spiral/cycle-bridge": "^2.9",
+        "spiral/framework": "^3.13",
+        "spiral/roadrunner-bridge": "^3.6"
+    },
+    "require-dev": {
+        "buggregator/trap": "^1.7",
+        "vimeo/psalm": "^5.9",
+        "spiral/roadrunner-cli": "^2.6",
+        "spiral/testing": "^2.3"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "app/src",
+            "Database\\": "app/database"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Tests\\": "tests"
+        }
+    },
+    "extra": {
+        "publish-cmd": "php app.php publish"
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "spiral/composer-publish-plugin": true,
+            "php-http/discovery": true
+        }
+    },
+    "scripts": {
+        "post-create-project-cmd": [
+            "php app.php encrypt:key -m .env",
+            "php app.php configure --quiet",
+            "rr get-binary --quiet",
+            "composer dump-autoload"
+        ],
+        "rr:download": "rr get-binary",
+        "rr:download-protoc": "rr download-protoc-binary",
+        "test": "vendor/bin/phpunit",
+        "test-coverage": "vendor/bin/phpunit --coverage",
+        "psalm:config": "psalm"
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}
