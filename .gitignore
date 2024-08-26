@@ -10,3 +10,4 @@ protoc-gen-php-grpc*
 .phpunit.cache/
 dolt
 .db
+composer.lock
