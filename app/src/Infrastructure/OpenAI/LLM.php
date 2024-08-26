@@ -27,7 +27,7 @@ final class LLM implements LLMInterface
         'functions' => null,
         'function_call' => null,
         'user' => null,
-        'model' => null,
+        'model' => 'gpt-4o-mini',
     ];
 
     public function __construct(
@@ -78,7 +78,7 @@ final class LLM implements LLMInterface
 
         // only keys that present in default options should be replaced
         foreach ($options as $key => $value) {
-            if (\array_key_exists($key, $this->defaultOptions)) {
+            if (isset($this->defaultOptions[$key])) {
                 $result[$key] = $value;
             }
         }
