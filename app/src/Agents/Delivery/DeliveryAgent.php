@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace App\Agents\Delivery;
 
 use App\Agents\AgentsCaller\AskAgentTool;
-use App\Agents\SiteStatusChecker\SiteStatusCheckerAgent;
 use LLM\Agents\Agent\Agent;
 use LLM\Agents\Agent\AgentAggregate;
+use LLM\Agents\Agent\SiteStatusChecker\SiteStatusCheckerAgent;
 use LLM\Agents\Solution\AgentLink;
 use LLM\Agents\Solution\MetadataType;
 use LLM\Agents\Solution\Model;

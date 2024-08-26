@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application;
 
+use LLM\Agents\Agent\SiteStatusChecker\Bootloader\SiteStatusCheckerBootloader;
 use Spiral\Boot\Bootloader\CoreBootloader;
 use Spiral\DotEnv\Bootloader\DotenvBootloader;
 use Spiral\Prototype\Bootloader\PrototypeBootloader;
@@ -42,6 +43,9 @@ class Kernel extends \Spiral\Framework\Kernel
             Bootloader\AgentsBootloader::class,
             Bootloader\PersistenceBootloader::class,
             Bootloader\SmartHomeBootloader::class,
+
+            // Agents
+            SiteStatusCheckerBootloader::class,
         ];
     }
 }
