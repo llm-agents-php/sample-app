@@ -8,6 +8,7 @@ use App\Application\Entity\Uuid;
 use App\Domain\Chat\ChatHistoryRepositoryInterface;
 use App\Domain\Chat\ChatServiceInterface;
 use App\Domain\Chat\Event\Message;
+use App\Domain\Chat\Event\MessageChunk;
 use App\Domain\Chat\Event\Question;
 use App\Domain\Chat\Event\ToolCall;
 use App\Domain\Chat\Event\ToolCallResult;
@@ -57,7 +58,13 @@ final class ChatWindowCommand extends Command
             }
 
             foreach ($this->iterateMessages($chatHistory) as $message) {
-                if ($message instanceof Message) {
+                if ($message instanceof MessageChunk) {
+                    $this->write($message->message);
+                    \usleep(20_000);
+                    if ($message->isLast) {
+                        $this->newLine();
+                    }
+                } elseif ($message instanceof Message) {
                     $this->write($message->message);
                     $this->newLine();
                 } elseif ($message instanceof Question) {
@@ -114,14 +121,14 @@ final class ChatWindowCommand extends Command
     }
 
     /**
-     * @return iterable<Message|ToolCall|ToolCallResult>
+     * @return iterable<Message|ToolCall|ToolCallResult|MessageChunk>
      */
     private function iterateMessages(ChatHistoryRepositoryInterface $chatHistory): iterable
     {
         $messages = $chatHistory->getMessages(Uuid::fromString($this->sessionUuid));
 
         foreach ($messages as $message) {
-            if ($message instanceof Message || $message instanceof Question) {
+            if ($message instanceof Message || $message instanceof Question || $message instanceof MessageChunk) {
                 if (\in_array((string) $message->uuid, $this->shownMessages, true)) {
                     continue;
                 }

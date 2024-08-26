@@ -19,7 +19,7 @@ final class StreamResponseParser
         $this->parsers[$type] = $parser;
     }
 
-    public function parse(StreamResponse $stream): Response
+    public function parse(StreamResponse $stream, ?StreamChunkCallbackInterface $callback = null): Response
     {
         $this->validateStreamResponse($stream);
 
@@ -29,7 +29,7 @@ final class StreamResponseParser
 
         foreach ($this->parsers as $type => $parser) {
             if ($responseClass === $type) {
-                return $parser->parse($stream);
+                return $parser->parse($stream, $callback);
             }
         }
 

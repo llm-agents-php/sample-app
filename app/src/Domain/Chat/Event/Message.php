@@ -6,7 +6,7 @@ namespace App\Domain\Chat\Event;
 
 use App\Application\Entity\Uuid;
 
-final readonly class Message
+readonly class Message
 {
     public Uuid $uuid;
 

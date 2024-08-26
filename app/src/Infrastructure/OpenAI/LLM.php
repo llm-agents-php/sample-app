@@ -17,17 +17,17 @@ use OpenAI\Contracts\ClientContract;
 final class LLM implements LLMInterface
 {
     protected array $defaultOptions = [
-        'temperature' => 0.8,
-        'max_tokens' => 120,
-        'top_p' => null,
-        'frequency_penalty' => null,
-        'presence_penalty' => null,
-        'stop' => null,
-        'logit_bias' => null,
-        'functions' => null,
-        'function_call' => null,
-        'user' => null,
-        'model' => 'gpt-4o-mini',
+        Option::Temperature->value => 0.8,
+        Option::MaxTokens->value => 120,
+        Option::TopP->value => null,
+        Option::FrequencyPenalty->value => null,
+        Option::PresencePenalty->value => null,
+        Option::Stop->value => null,
+        Option::LogitBias->value => null,
+        Option::FunctionCall->value => null,
+        Option::Functions->value => null,
+        Option::User->value => null,
+        Option::Model->value => 'gpt-4o-mini',
     ];
 
     public function __construct(
@@ -41,6 +41,8 @@ final class LLM implements LLMInterface
         PromptInterface $prompt,
         OptionsInterface $options,
     ): Response {
+        \assert($options instanceof Options);
+
         $request = $this->buildOptions($options);
 
         if ($prompt instanceof ChatPromptInterface) {
@@ -55,13 +57,19 @@ final class LLM implements LLMInterface
             $request['messages'][] = $this->messageMapper->map($message);
         }
 
-        if ($options->has('tools')) {
+        if ($options->has(Option::Tools)) {
             $request['tools'] = \array_values(
                 \array_map(
                     fn(Tool $tool): array => $this->messageMapper->map($tool),
-                    $options->get('tools'),
+                    $options->get(Option::Tools),
                 ),
             );
+        }
+
+        $callback = null;
+        if ($options->has(Option::StreamChunkCallback)) {
+            $callback = $options->get(Option::StreamChunkCallback);
+            \assert($callback instanceof StreamChunkCallbackInterface);
         }
 
         $stream = $this
@@ -69,7 +77,7 @@ final class LLM implements LLMInterface
             ->chat()
             ->createStreamed($request);
 
-        return $this->streamParser->parse($stream);
+        return $this->streamParser->parse($stream, $callback);
     }
 
     protected function buildOptions(OptionsInterface $options): array

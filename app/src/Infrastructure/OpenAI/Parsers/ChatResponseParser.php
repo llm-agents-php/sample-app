@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Infrastructure\OpenAI\Parsers;
 
 use App\Infrastructure\OpenAI\Event\MessageChunk;
+use App\Infrastructure\OpenAI\StreamChunkCallbackInterface;
 use LLM\Agents\LLM\Response\FinishReason;
 use LLM\Agents\LLM\Response\Response;
 use LLM\Agents\LLM\Response\StreamChatResponse;
@@ -20,11 +21,9 @@ final readonly class ChatResponseParser implements ParserInterface
         private ?EventDispatcherInterface $eventDispatcher = null,
     ) {}
 
-    /**
-     * @param ResponseStreamContract<int, CreateStreamedResponse> $stream
-     */
-    public function parse(ResponseStreamContract $stream): Response
+    public function parse(ResponseStreamContract $stream, ?StreamChunkCallbackInterface $callback = null): Response
     {
+        $callback ??= static fn(?string $chunk, bool $stop, ?string $finishReason = null) => null;
         $result = '';
         $finishReason = null;
         /** @var ToolCall[] $toolCalls */
@@ -34,6 +33,7 @@ final readonly class ChatResponseParser implements ParserInterface
         /** @var CreateStreamedResponse[] $stream */
         foreach ($stream as $chunk) {
             if ($chunk->choices[0]->finishReason !== null) {
+                $callback(chunk: '', stop: true, finishReason: $chunk->choices[0]->finishReason);
                 $this->eventDispatcher?->dispatch(
                     new MessageChunk(
                         chunk: '',
@@ -80,6 +80,7 @@ final readonly class ChatResponseParser implements ParserInterface
                 continue;
             }
 
+            $callback(chunk: $chunk->choices[0]->delta->content, stop: false);
             $this->eventDispatcher->dispatch(
                 new MessageChunk(
                     chunk: $chunk->choices[0]->delta->content,

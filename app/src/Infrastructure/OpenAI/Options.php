@@ -18,21 +18,40 @@ readonly class Options implements OptionsInterface
         return new \ArrayIterator($this->options);
     }
 
-    public function has(string $option): bool
+    public function has(string|Option $option): bool
     {
-        return isset($this->options[$option]);
+        return isset($this->options[$this->prepareKey($option)]);
     }
 
-    public function get(string $option, mixed $default = null): mixed
+    public function get(string|Option $option, mixed $default = null): mixed
     {
-        return $this->options[$option] ?? $default;
+        return $this->options[$this->prepareKey($option)] ?? $default;
     }
 
-    public function with(string $option, mixed $value): static
+    public function with(string|Option $option, mixed $value): static
     {
         $options = $this->options;
-        $options[$option] = $value;
+        $options[$this->prepareKey($option)] = $value;
 
         return new static($options);
+    }
+
+    private function prepareKey(string|Option $key): string
+    {
+        return match (true) {
+            $key instanceof Option => $key->value,
+            default => $key,
+        };
+    }
+
+    public function merge(OptionsInterface $options): static
+    {
+        $mergedOptions = $this->options;
+
+        foreach ($options as $key => $value) {
+            $mergedOptions[$key] = $value;
+        }
+
+        return new static($mergedOptions);
     }
 }

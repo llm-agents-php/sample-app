@@ -7,6 +7,7 @@ namespace App\Domain\Chat;
 use App\Application\Entity\Uuid;
 use App\Domain\Agent\AgentExecutorBuilder;
 use App\Domain\Chat\Exception\ChatNotFoundException;
+use App\Infrastructure\OpenAI\StreamChunkCallback;
 use LLM\Agents\Agent\AgentRepositoryInterface;
 use LLM\Agents\Agent\Exception\AgentNotFoundException;
 use LLM\Agents\Agent\Execution;
@@ -153,6 +154,12 @@ final readonly class SimpleChatService implements ChatServiceInterface
     {
         $agent = $this->builder
             ->withAgentKey($session->agentName)
+            ->withStreamChunkCallback(
+                new StreamChunkCallback(
+                    sessionUuid: $session->uuid,
+                    eventDispatcher: $this->eventDispatcher,
+                ),
+            )
             ->withSessionContext([
                 'account_uuid' => (string) $session->accountUuid,
                 'session_uuid' => (string) $session->uuid,
