@@ -1,0 +1,1450 @@
+This is an example of Agent with Tools, Memory and Initial Prompts. It can be used as a template for creating new agents and tools.
+Important: Always use gp4-0-mini as the base model for new agents.
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/AgentsCaller
+namespace App\Agents\AgentsCaller;
+use Spiral\JsonSchemaGenerator\Attribute\Field;
+final class AskAgentInput
+{
+    public function __construct(
+        #[Field(title: 'Agent Name', description: 'The name of the agent to ask.')]
+        public string $name,
+        #[Field(title: 'Question', description: 'The question to ask the agent.')]
+        public string $question,
+        #[Field(title: 'Output Schema', description: 'The schema of the output.')]
+        public string $outputSchema,
+    ) {}
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/AgentsCaller
+namespace App\Agents\AgentsCaller;
+use App\Domain\Tool\PhpTool;
+use LLM\Agents\Agent\AgentExecutor;
+use LLM\Agents\LLM\Prompt\Chat\ToolCallResultMessage;
+use LLM\Agents\LLM\Response\ToolCalledResponse;
+use LLM\Agents\Tool\ToolExecutor;
+/**
+ * @extends PhpTool<AskAgentInput>
+ */
+final class AskAgentTool extends PhpTool
+{
+    public const NAME = 'ask_agent';
+    public function __construct(
+        private readonly AgentExecutor $executor,
+        private readonly ToolExecutor $toolExecutor,
+    ) {
+        parent::__construct(
+            name: self::NAME,
+            inputSchema: AskAgentInput::class,
+            description: 'Ask an agent with given name to execute a task.',
+        );
+    }
+    public function execute(object $input): string|\Stringable
+    {
+        $prompt = \sprintf(
+            <<<'PROMPT'
+%s
+Important rules:
+- Think before responding to the user.
+- Don not markup the content. Only JSON is allowed.
+- Don't write anything except the answer using JSON schema.
+- Answer in JSON using this schema:
+%s
+PROMPT
+            ,
+            $input->question,
+            $input->outputSchema,
+        );
+        // TODO: make async
+        while (true) {
+            $execution = $this->executor->execute($input->name, $prompt);
+            $result = $execution->result;
+            $prompt = $execution->prompt;
+            if ($result instanceof ToolCalledResponse) {
+                foreach ($result->tools as $tool) {
+                    $functionResult = $this->toolExecutor->execute($tool->name, $tool->arguments);
+                    $prompt = $prompt->withAddedMessage(
+                        new ToolCallResultMessage(
+                            id: $tool->id,
+                            content: [$functionResult],
+                        ),
+                    );
+                }
+                continue;
+            }
+            break;
+        }
+        return \json_encode($result->content);
+    }
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SiteStatusChecker
+namespace App\Agents\SiteStatusChecker;
+use LLM\Agents\Agent\Agent;
+use LLM\Agents\Agent\AgentAggregate;
+use LLM\Agents\Solution\MetadataType;
+use LLM\Agents\Solution\Model;
+use LLM\Agents\Solution\SolutionMetadata;
+use LLM\Agents\Solution\ToolLink;
+final class SiteStatusCheckerAgent extends AgentAggregate
+{
+    public const NAME = 'site_status_checker';
+    public static function create(): self
+    {
+        $agent = new Agent(
+            key: self::NAME,
+            name: 'Site Status Checker',
+            description: 'This agent specializes in checking the online status of websites. It can verify if a given URL is accessible, retrieve basic information about the site, and provide insights on potential issues if a site is offline.',
+            instruction: 'You are a website status checking assistant. Your primary goal is to help users determine if a website is online and provide relevant information about its status. Use the provided tools to check site availability, retrieve DNS information, and perform ping tests when necessary. Always aim to give clear, concise responses about a site\'s status and offer potential reasons or troubleshooting steps if a site appears to be offline.',
+        );
+        $aggregate = new self($agent);
+        $aggregate->addMetadata(
+        // Instructions
+            new SolutionMetadata(
+                type: MetadataType::Memory,
+                key: 'describe_decisions',
+                content: 'Before calling any tools, describe the decisions you are making and why you are making them.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Memory,
+                key: 'check_availability_first',
+                content: 'Always start by checking the site\'s availability before using other tools.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Memory,
+                key: 'don_not_repeat',
+                content: 'Don\'t repeat yourself. If you have already provided something, don\'t repeat it unless necessary.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Memory,
+                key: 'offline_site_checks',
+                content: 'If a site is offline, consider checking DNS information and performing a ping test to gather more data.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Memory,
+                key: 'explain_technical_terms',
+                content: 'Provide clear explanations of technical terms and status codes for users who may not be familiar with them.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Memory,
+                key: 'suggest_troubleshooting',
+                content: 'Suggest common troubleshooting steps if a site appears to be offline.',
+            ),
+            // Prompts examples
+            new SolutionMetadata(
+                type: MetadataType::Prompt,
+                key: 'google',
+                content: 'Check if google.com is online.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Prompt,
+                key: 'offline_site',
+                content: 'Can you check why buggregator.dev is offline?',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Configuration,
+                key: 'max_tokens',
+                content: 3000,
+            ),
+        );
+        $model = new Model(model: 'gpt-4o-mini');
+        $aggregate->addAssociation($model);
+        $aggregate->addAssociation(new ToolLink(name: CheckSiteAvailabilityTool::NAME));
+        $aggregate->addAssociation(new ToolLink(name: GetDNSInfoTool::NAME));
+        $aggregate->addAssociation(new ToolLink(name: PerformPingTestTool::NAME));
+        return $aggregate;
+    }
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SiteStatusChecker
+namespace App\Agents\SiteStatusChecker;
+use LLM\Agents\Agent\AgentFactoryInterface;
+use LLM\Agents\Agent\AgentInterface;
+final class SiteStatusCheckerAgentFactory implements AgentFactoryInterface
+{
+    public function create(): AgentInterface
+    {
+        return SiteStatusCheckerAgent::create();
+    }
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SiteStatusChecker
+namespace App\Agents\SiteStatusChecker;
+use App\Domain\Tool\PhpTool;
+/**
+ * @extends  PhpTool<PerformPingTestInput>
+ */
+final class PerformPingTestTool extends PhpTool
+{
+    public const NAME = 'perform_ping_test';
+    public function __construct()
+    {
+        parent::__construct(
+            name: self::NAME,
+            inputSchema: PerformPingTestInput::class,
+            description: 'This tool performs a ping test to a specified host and returns the results, including response times and packet loss.',
+        );
+    }
+    public function execute(object $input): string
+    {
+        // Implement the actual ping test here
+        // This is a placeholder implementation
+        $command = \sprintf('ping -c %d %s', 4, \escapeshellarg($input->host));
+        \exec($command, $output, $returnVar);
+        $packetLoss = 0;
+        $avgRoundTripTime = 0;
+        foreach ($output as $line) {
+            if (str_contains($line, 'packet loss')) {
+                \preg_match('/(\d+(?:\.\d+)?)%/', $line, $matches);
+                $packetLoss = $matches[1] ?? 0;
+            }
+            if (str_contains($line, 'rtt min/avg/max')) {
+                \preg_match('/= [\d.]+\/([\d.]+)\/[\d.]+/', $line, $matches);
+                $avgRoundTripTime = $matches[1] ?? 0;
+            }
+        }
+        return \json_encode([
+            'packet_loss_percentage' => (float) $packetLoss,
+            'avg_round_trip_time_ms' => (float) $avgRoundTripTime,
+            'success' => $returnVar === 0,
+        ]);
+    }
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SiteStatusChecker
+namespace App\Agents\SiteStatusChecker;
+use Spiral\JsonSchemaGenerator\Attribute\Field;
+final readonly class PerformPingTestInput
+{
+    public function __construct(
+        #[Field(title: 'Host', description: 'The hostname or IP address to ping')]
+        public string $host,
+    ) {}
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SiteStatusChecker
+namespace App\Agents\SiteStatusChecker;
+use Spiral\JsonSchemaGenerator\Attribute\Field;
+final readonly class GetDNSInfoInput
+{
+    public function __construct(
+        #[Field(title: 'Domain', description: 'The domain name to look up DNS information for')]
+        public string $domain,
+    ) {}
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SiteStatusChecker
+namespace App\Agents\SiteStatusChecker;
+use App\Domain\Tool\PhpTool;
+/**
+ * @extends  PhpTool<CheckSiteAvailabilityInput>
+ */
+final class CheckSiteAvailabilityTool extends PhpTool
+{
+    public const NAME = 'check_site_availability';
+    public function __construct()
+    {
+        parent::__construct(
+            name: self::NAME,
+            inputSchema: CheckSiteAvailabilityInput::class,
+            description: 'This tool checks if a given URL is accessible and returns its HTTP status code and response time.',
+        );
+    }
+    public function execute(object $input): string
+    {
+        $ch = \curl_init($input->url);
+        \curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HEADER => true,
+            CURLOPT_NOBODY => true,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_MAXREDIRS => 10,
+            CURLOPT_TIMEOUT => 30,
+        ]);
+        $startTime = \microtime(true);
+        $response = \curl_exec($ch);
+        $endTime = \microtime(true);
+        $statusCode = \curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $finalUrl = \curl_getinfo($ch, CURLINFO_EFFECTIVE_URL);
+        $redirectCount = \curl_getinfo($ch, CURLINFO_REDIRECT_COUNT);
+        $responseTime = \round(($endTime - $startTime) * 1000, 2);
+        \curl_close($ch);
+        $isOnline = $statusCode >= 200 && $statusCode < 400;
+        return \json_encode([
+            'status_code' => $statusCode,
+            'response_time_ms' => $responseTime,
+            'is_online' => $isOnline,
+            'final_url' => $finalUrl,
+            'redirect_count' => $redirectCount,
+        ]);
+    }
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SiteStatusChecker
+namespace App\Agents\SiteStatusChecker;
+use App\Domain\Tool\PhpTool;
+/**
+ * @extends  PhpTool<GetDNSInfoInput>
+ */
+final class GetDNSInfoTool extends PhpTool
+{
+    public const NAME = 'get_dns_info';
+    public function __construct()
+    {
+        parent::__construct(
+            name: self::NAME,
+            inputSchema: GetDNSInfoInput::class,
+            description: 'This tool retrieves DNS information for a given domain, including IP addresses and name servers.',
+        );
+    }
+    public function execute(object $input): string
+    {
+        // Implement the actual DNS info retrieval here
+        // This is a placeholder implementation
+        $dnsRecords = \dns_get_record($input->domain, DNS_A + DNS_NS);
+        $ipAddresses = \array_column(array_filter($dnsRecords, fn($record) => $record['type'] === 'A'), 'ip');
+        $nameServers = \array_column(array_filter($dnsRecords, fn($record) => $record['type'] === 'NS'), 'target');
+        return \json_encode([
+            'ip_addresses' => $ipAddresses,
+            'name_servers' => $nameServers,
+        ]);
+    }
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SiteStatusChecker
+namespace App\Agents\SiteStatusChecker;
+use Spiral\JsonSchemaGenerator\Attribute\Field;
+final readonly class CheckSiteAvailabilityInput
+{
+    public function __construct(
+        #[Field(title: 'URL', description: 'The full URL of the website to check')]
+        public string $url,
+    ) {}
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/TaskSplitter
+namespace App\Agents\TaskSplitter;
+use App\Domain\Tool\PhpTool;
+/**
+ * @extends  PhpTool<ProjectDescriptionInput>
+ */
+final class GetProjectDescription extends PhpTool
+{
+    public const NAME = 'get_project_description';
+    public function __construct()
+    {
+        parent::__construct(
+            name: self::NAME,
+            inputSchema: ProjectDescriptionInput::class,
+            description: 'Get the description of a project from the project management system.',
+        );
+    }
+    public function execute(object $input): string
+    {
+        return json_encode([
+            'uuid' => $input->uuid,
+            'title' => 'Оплата услуг клиентом',
+            'description' => <<<'TEXT'
+**As a customer, I want to be able to:**
+- **Choose a subscription plan during registration:**
+  - When creating an account on the service's website, I should be offered a choice of different subscription plans.
+  - Each plan should include a clear description of the services provided and their costs.
+- **Subscribe to a plan using a credit card:**
+  - After selecting a plan, I need to provide my credit card details for payment.
+  - There should be an option to save my card details for automatic monthly payments.
+- **Receive monthly payment notifications:**
+  - I expect to receive notifications via email or through my personal account about upcoming subscription charges.
+  - The notification should arrive a few days before the charge, giving me enough time to ensure sufficient funds are available.
+- **Access all necessary documents in my personal account:**
+  - All financial documents, such as receipts and invoices, should be available for download at any time in my personal account.
+- **Cancel the service if needed:**
+  - I should be able to easily cancel my subscription through my personal account without needing to make additional calls or contact customer support.
+- **Add a new card if the current one expires:**
+  - If my credit card expires, I want to easily add a new card to the system through my personal account.
+- **Continue using the service after cancellation until the end of the paid period:**
+  - If I cancel my subscription, I expect to continue using the service until the end of the already paid period.
+TEXT
+            ,
+        ]);
+    }
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/TaskSplitter
+namespace App\Agents\TaskSplitter;
+use LLM\Agents\Agent\AgentFactoryInterface;
+use LLM\Agents\Agent\AgentInterface;
+final class TaskSplitterAgentFactory implements AgentFactoryInterface
+{
+    public function create(): AgentInterface
+    {
+        return TaskSplitterAgent::create();
+    }
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/TaskSplitter
+namespace App\Agents\TaskSplitter;
+use Spiral\JsonSchemaGenerator\Attribute\Field;
+final class ProjectDescriptionInput
+{
+    public function __construct(
+        #[Field(title: 'Project ID', description: 'The ID of the project to get the description for.')]
+        public string $uuid,
+    ) {}
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/TaskSplitter
+namespace App\Agents\TaskSplitter;
+use Spiral\JsonSchemaGenerator\Attribute\Field;
+final readonly class TaskCreateInput
+{
+    public function __construct(
+        #[Field(title: 'Project UUID', description: 'The UUID of the project to which the task belongs.')]
+        public string $projectUuid,
+        #[Field(title: 'Task Name', description: 'The name of the task to be created.')]
+        public string $name,
+        #[Field(title: 'Task Description', description: 'The description of the task to be created.')]
+        public string $description,
+        #[Field(title: 'Parent Task ID', description: 'The ID of the parent task if this is a subtask. Empty string for top-level tasks. Multiple levels should be separated by a "/".')]
+        public string $parentTaskUuid,
+    ) {}
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/TaskSplitter
+namespace App\Agents\TaskSplitter;
+use LLM\Agents\Agent\Agent;
+use LLM\Agents\Agent\AgentAggregate;
+use LLM\Agents\Solution\MetadataType;
+use LLM\Agents\Solution\Model;
+use LLM\Agents\Solution\SolutionMetadata;
+use LLM\Agents\Solution\ToolLink;
+final class TaskSplitterAgent extends AgentAggregate
+{
+    public const NAME = 'task_splitter';
+    public static function create(): self
+    {
+        $agent = new Agent(
+            key: self::NAME,
+            name: 'Task Splitter',
+            description: 'An agent that splits project descriptions into structured task lists.',
+            instruction: 'You are a task organization assistant. Your primary goal is to analyze project descriptions and break them down into well-structured task lists with subtasks.',
+        );
+        $aggregate = new self($agent);
+        $aggregate->addMetadata(
+            new SolutionMetadata(
+                type: MetadataType::Memory,
+                key: 'task_organization_tip',
+                content: 'Always aim to create a logical hierarchy of tasks and subtasks. Main tasks should be broad objectives, while subtasks should be specific, actionable items.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Memory,
+                key: 'efficiency_tip',
+                content: 'Try to keep the number of main tasks between 3 and 7 for better manageability. Break down complex tasks into subtasks when necessary.',
+            ),
+            // Prompts examples
+            new SolutionMetadata(
+                type: MetadataType::Prompt,
+                key: 'split_task',
+                content: 'Split the project description f47ac10b-58cc-4372-a567-0e02b2c3d479 into a list of tasks and subtasks.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Configuration,
+                key: 'max_tokens',
+                content: 3000,
+            ),
+        );
+        $model = new Model(model: 'gpt-4o-mini');
+        $aggregate->addAssociation($model);
+        $aggregate->addAssociation(new ToolLink(name: TaskCreateTool::NAME));
+        $aggregate->addAssociation(new ToolLink(name: GetProjectDescription::NAME));
+        return $aggregate;
+    }
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/TaskSplitter
+namespace App\Agents\TaskSplitter;
+use App\Application\Entity\Uuid;
+use App\Domain\Tool\PhpTool;
+use Spiral\Boot\DirectoriesInterface;
+use Spiral\Files\FilesInterface;
+/**
+ * @extends  PhpTool<TaskCreateInput>
+ */
+final class TaskCreateTool extends PhpTool
+{
+    public const NAME = 'create_task';
+    public function __construct(
+        private readonly FilesInterface $files,
+        private readonly DirectoriesInterface $dirs,
+    ) {
+        parent::__construct(
+            name: self::NAME,
+            inputSchema: TaskCreateInput::class,
+            description: 'Create a task or subtask in the task management system.',
+        );
+    }
+    public function execute(object $input): string
+    {
+        $uuid = (string) Uuid::generate();
+        $dir = $this->dirs->get('runtime') . 'tasks/';
+        if ($input->parentTaskUuid !== '') {
+            $path = \sprintf('%s/%s/%s.json', $input->projectUuid, $input->parentTaskUuid, $uuid);
+        } else {
+            $path = \sprintf('%s/%s.json', $input->projectUuid, $uuid);
+        }
+        $fullPath = $dir . $path;
+        $this->files->ensureDirectory(\dirname($fullPath));
+        $this->files->touch($fullPath);
+        $this->files->write(
+            $fullPath,
+            \sprintf(
+                <<<'CONTENT'
+uuid: %s
+parent_uuid: %s
+project_uuid: %s
+---
+## %s
+%s
+CONTENT,
+                $uuid,
+                $input->parentTaskUuid ?? '-',
+                $input->projectUuid,
+                $input->name,
+                \trim($input->description),
+            ),
+        );
+        return json_encode(['task_uuid' => $uuid]);
+    }
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/Delivery
+namespace App\Agents\Delivery;
+use App\Domain\Tool\PhpTool;
+/**
+ * @extends  PhpTool<ProfileInput>
+ */
+final class GetProfileTool extends PhpTool
+{
+    public const NAME = 'get_profile';
+    public function __construct()
+    {
+        parent::__construct(
+            name: self::NAME,
+            inputSchema: ProfileInput::class,
+            description: 'Get the customer\'s profile information.',
+        );
+    }
+    public function execute(object $input): string
+    {
+        return \json_encode([
+            'account_uuid' => $input->accountId,
+            'first_name' => 'John',
+            'last_name' => 'Doe',
+            'age' => \rand(10, 100),
+        ]);
+    }
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/Delivery
+namespace App\Agents\Delivery;
+use App\Agents\AgentsCaller\AskAgentTool;
+use App\Agents\SiteStatusChecker\SiteStatusCheckerAgent;
+use LLM\Agents\Agent\Agent;
+use LLM\Agents\Agent\AgentAggregate;
+use LLM\Agents\Solution\AgentLink;
+use LLM\Agents\Solution\MetadataType;
+use LLM\Agents\Solution\Model;
+use LLM\Agents\Solution\SolutionMetadata;
+use LLM\Agents\Solution\ToolLink;
+final class DeliveryAgent extends AgentAggregate
+{
+    public const NAME = 'order_assistant';
+    public static function create(): self
+    {
+        $agent = new Agent(
+            key: self::NAME,
+            name: 'Order Assistant',
+            description: 'Helps customers with order-related questions.',
+            instruction: 'You are a helpful customer support assistant. Use the supplied tools to assist the user.',
+        );
+        $aggregate = new self($agent);
+        // Add some refiners to make the agent smarter
+        $aggregate->addMetadata(
+        // Memory
+            new SolutionMetadata(
+                type: MetadataType::Memory,
+                key: 'order_tip',
+                content: 'First, retrieve the customer profile to provide personalized service.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Memory,
+                key: 'order_tip_server',
+                content: 'Always check the server [google.com] status before providing any information.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Memory,
+                key: 'order_tip_repeat',
+                content: 'Don\'t repeat the same information to the customer. If you have already provided the order number, don\'t repeat it. Provide only new information.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Memory,
+                key: 'order_tip_age',
+                content: 'Tone of conversation is important, pay attention on age and fit the conversation to the age of the customer.',
+            ),
+            // Prompt
+            new SolutionMetadata(
+                type: MetadataType::Prompt,
+                key: 'server_status',
+                content: 'Check the server [google.com] status to ensure that the system is operational.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Prompt,
+                key: 'what_is_order_number',
+                content: 'What is my order number?',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Prompt,
+                key: 'when_is_delivery',
+                content: 'When will my order be delivered?',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Prompt,
+                key: 'my_profile',
+                content: 'Can you tell me more about my profile?',
+            ),
+        );
+        // Add a model to the agent
+        $model = new Model(model: 'gpt-4o-mini');
+        $aggregate->addAssociation($model);
+        $aggregate->addAssociation(new ToolLink(name: GetDeliveryDateTool::NAME));
+        $aggregate->addAssociation(new ToolLink(name: GetOrderNumberTool::NAME));
+        $aggregate->addAssociation(new ToolLink(name: GetProfileTool::NAME));
+        $aggregate->addAssociation(new ToolLink(name: AskAgentTool::NAME));
+        $aggregate->addAssociation(
+            new AgentLink(
+                name: SiteStatusCheckerAgent::NAME,
+                outputSchema: StatusCheckOutput::class,
+            ),
+        );
+        return $aggregate;
+    }
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/Delivery
+namespace App\Agents\Delivery;
+use App\Domain\Tool\PhpTool;
+/**
+ * @extends  PhpTool<OrderNumberInput>
+ */
+final class GetOrderNumberTool extends PhpTool
+{
+    public const NAME = 'get_order_number';
+    public function __construct()
+    {
+        parent::__construct(
+            name: self::NAME,
+            inputSchema: OrderNumberInput::class,
+            description: 'Get the order number for a customer.',
+        );
+    }
+    public function execute(object $input): string
+    {
+        return \json_encode([
+            'customer_id' => $input->customerId,
+            'customer' => 'John Doe',
+            'order_number' => 'abc-' . $input->customerId,
+        ]);
+    }
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/Delivery
+namespace App\Agents\Delivery;
+use LLM\Agents\Agent\AgentFactoryInterface;
+use LLM\Agents\Agent\AgentInterface;
+final class DeliveryAgentFactory implements AgentFactoryInterface
+{
+    public function create(): AgentInterface
+    {
+        return DeliveryAgent::create();
+    }
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/Delivery
+namespace App\Agents\Delivery;
+use Spiral\JsonSchemaGenerator\Attribute\Field;
+final readonly class ProfileInput
+{
+    public function __construct(
+        #[Field(title: 'Account ID', description: 'The customer\'s account ID.')]
+        public string $accountId,
+    ) {}
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/Delivery
+namespace App\Agents\Delivery;
+use Spiral\JsonSchemaGenerator\Attribute\Field;
+final readonly class OrderNumberInput
+{
+    public function __construct(
+        #[Field(title: 'Customer ID', description: 'The Customer ID')]
+        public string $customerId,
+    ) {}
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/Delivery
+namespace App\Agents\Delivery;
+use App\Domain\Tool\PhpTool;
+use Carbon\Carbon;
+/**
+ * @extends  PhpTool<DeliveryDateInput>
+ */
+final class GetDeliveryDateTool extends PhpTool
+{
+    public const NAME = 'get_delivery_date';
+    public function __construct()
+    {
+        parent::__construct(
+            name: self::NAME,
+            inputSchema: DeliveryDateInput::class,
+            description: 'Get the delivery date for a customer\'s order. Call this whenever you need to know the delivery date, for example when a customer asks \'Where is my package\'',
+        );
+    }
+    public function execute(object $input): string
+    {
+        return \json_encode([
+            'delivery_date' => Carbon::now()->addDays(\rand(1, 100))->toDateString(),
+        ]);
+    }
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/Delivery
+namespace App\Agents\Delivery;
+use Spiral\JsonSchemaGenerator\Attribute\Field;
+final readonly class DeliveryDateInput
+{
+    public function __construct(
+        #[Field(title: 'Order ID', description: 'The customer\'s order ID. Should be always uppercase!')]
+        public string $orderId,
+    ) {}
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/Delivery
+namespace App\Agents\Delivery;
+use Spiral\JsonSchemaGenerator\Attribute\Field;
+final class StatusCheckOutput
+{
+    public function __construct(
+        #[Field(title: 'Status Code', description: 'The server status code.')]
+        public string $code,
+        #[Field(title: 'Response Time', description: 'The server response time in milliseconds.')]
+        public string $responseTime,
+        #[Field(title: 'Url', description: 'The server URL.')]
+        public string $url,
+    ) {}
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SmartHomeControl
+namespace App\Agents\SmartHomeControl;
+use Spiral\JsonSchemaGenerator\Attribute\Field;
+final readonly class ListRoomDevicesInput
+{
+    public function __construct(
+        #[Field(title: 'Room Name', description: 'The name of the room to list devices from')]
+        public string $roomName,
+    ) {}
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SmartHomeControl
+namespace App\Agents\SmartHomeControl;
+use App\Agents\SmartHomeControl\SmartHome\SmartHomeSystem;
+use App\Domain\Tool\PhpTool;
+/**
+ * @extends  PhpTool<GetDeviceDetailsInput>
+ */
+final class GetDeviceDetailsTool extends PhpTool
+{
+    public const NAME = 'get_device_details';
+    public function __construct(
+        private SmartHomeSystem $smartHome,
+    ) {
+        parent::__construct(
+            name: self::NAME,
+            inputSchema: GetDeviceDetailsInput::class,
+            description: 'Retrieves detailed information about a specific device.',
+        );
+    }
+    public function execute(object $input): string
+    {
+        $device = $this->smartHome->getDevice($input->deviceId);
+        if (!$device) {
+            return json_encode(['error' => 'Device not found']);
+        }
+        return json_encode([
+            'id' => $device->id,
+            'name' => $device->name,
+            'room' => $device->room,
+            'type' => get_class($device),
+            'params' => $device->getDetails(),
+        ]);
+    }
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SmartHomeControl
+namespace App\Agents\SmartHomeControl;
+use Spiral\JsonSchemaGenerator\Attribute\Field;
+final readonly class ControlDeviceInput
+{
+    public function __construct(
+        #[Field(title: 'Device ID', description: 'The unique identifier of the device to control')]
+        public string $deviceId,
+        #[Field(title: 'Action', description: 'The action to perform on the device (e.g., turnOn, turnOff, setBrightness)')]
+        public string $action,
+        /**
+         * @var array<DeviceParam>
+         */
+        #[Field(title: 'Parameters', description: 'Additional parameters for the action. If the action does not require parameters, this field should be an empty array')]
+        public array $params,
+    ) {}
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SmartHomeControl
+namespace App\Agents\SmartHomeControl;
+use App\Agents\SmartHomeControl\SmartHome\SmartHomeSystem;
+use App\Domain\Tool\PhpTool;
+/**
+ * @extends  PhpTool<ListRoomDevicesInput>
+ */
+final class ListRoomDevicesTool extends PhpTool
+{
+    public const NAME = 'list_room_devices';
+    public function __construct(
+        private readonly SmartHomeSystem $smartHome,
+    ) {
+        parent::__construct(
+            name: self::NAME,
+            inputSchema: ListRoomDevicesInput::class,
+            description: 'Lists all smart devices in a specified room.',
+        );
+    }
+    public function execute(object $input): string
+    {
+        $devices = $this->smartHome->getRoomDevices($input->roomName);
+        $deviceList = [];
+        foreach ($devices as $device) {
+            $deviceList[] = [
+                'id' => $device->id,
+                'name' => $device->name,
+                'type' => get_class($device),
+                'status' => $device->getStatus() ? 'on' : 'off',
+            ];
+        }
+        return json_encode([
+            'room' => $input->roomName,
+            'devices' => $deviceList,
+        ]);
+    }
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SmartHomeControl
+namespace App\Agents\SmartHomeControl;
+use App\Agents\SmartHomeControl\SmartHome\SmartHomeSystem;
+use App\Domain\Tool\PhpTool;
+/**
+ * @extends  PhpTool<ControlDeviceInput>
+ */
+final class ControlDeviceTool extends PhpTool
+{
+    public const NAME = 'control_device';
+    public function __construct(
+        private SmartHomeSystem $smartHome,
+    ) {
+        parent::__construct(
+            name: self::NAME,
+            inputSchema: ControlDeviceInput::class,
+            description: 'Controls a specific device by performing the specified action with given parameters.',
+        );
+    }
+    public function execute(object $input): string
+    {
+        $result = $this->smartHome->controlDevice($input->deviceId, $input->action, $input->params);
+        if (isset($result['error'])) {
+            return json_encode(['error' => $result['error']]);
+        }
+        return json_encode([
+            'id' => $input->deviceId,
+            'action' => $input->action,
+        ]);
+    }
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SmartHomeControl
+namespace App\Agents\SmartHomeControl;
+use Spiral\JsonSchemaGenerator\Attribute\Field;
+final readonly class GetDeviceDetailsInput
+{
+    public function __construct(
+        #[Field(title: 'Device ID', description: 'The unique identifier of the device')]
+        public string $deviceId,
+    ) {}
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SmartHomeControl
+namespace App\Agents\SmartHomeControl;
+use Spiral\JsonSchemaGenerator\Attribute\Field;
+final readonly class GetRoomListInput
+{
+    public function __construct(
+        // The input parameter is the name of the room to list devices from
+        #[Field(title: 'Home Name', description: 'The name of the home to list rooms from')]
+        public string $home,
+    ) {
+    }
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SmartHomeControl/SmartHome
+namespace App\Agents\SmartHomeControl\SmartHome;
+use App\Agents\SmartHomeControl\SmartHome\Devices\Light;
+use App\Agents\SmartHomeControl\SmartHome\Devices\SmartAppliance;
+use App\Agents\SmartHomeControl\SmartHome\Devices\SmartDevice;
+use App\Agents\SmartHomeControl\SmartHome\Devices\Thermostat;
+use App\Agents\SmartHomeControl\SmartHome\Devices\TV;
+use Spiral\Core\Attribute\Singleton;
+#[Singleton]
+final class SmartHomeSystem
+{
+    /** @var array<string, SmartDevice> */
+    private array $devices = [];
+    public function addDevice(SmartDevice $device): void
+    {
+        $this->devices[$device->id] = $device;
+    }
+    public function getDevice(string $id): ?SmartDevice
+    {
+        return $this->devices[$id] ?? null;
+    }
+    public function getRoomList(): array
+    {
+        $rooms = \array_unique(\array_map(fn($device) => $device->room, $this->devices));
+        \sort($rooms);
+        return $rooms;
+    }
+    public function getRoomDevices(string $room): array
+    {
+        return \array_filter($this->devices, static fn($device): bool => $device->room === $room);
+    }
+    public function controlDevice(string $id, string $action, array $params = []): array
+    {
+        $device = $this->getDevice($id);
+        if (!$device) {
+            return ['error' => 'Device not found'];
+        }
+        switch ($action) {
+            case 'turnOn':
+                $device->turnOn();
+                break;
+            case 'turnOff':
+                $device->turnOff();
+                break;
+            case 'setBrightness':
+                if ($device instanceof Light && isset($params['brightness'])) {
+                    $device->setBrightness($params['brightness']);
+                }
+                break;
+            case 'setColor':
+                if ($device instanceof Light && isset($params['color'])) {
+                    $device->setColor($params['color']);
+                }
+                break;
+            case 'setTemperature':
+                if ($device instanceof Thermostat && isset($params['temperature'])) {
+                    $device->setTemperature($params['temperature']);
+                }
+                break;
+            case 'setThermostatMode':
+                if ($device instanceof Thermostat && isset($params['mode'])) {
+                    $device->setMode($params['mode']);
+                }
+                break;
+            case 'setTVVolume':
+                if ($device instanceof TV && isset($params['volume'])) {
+                    $device->setVolume($params['volume']);
+                }
+                break;
+            case 'setTVInput':
+                if ($device instanceof TV && isset($params['input'])) {
+                    $device->setInput($params['input']);
+                }
+                break;
+            case 'setApplianceAttribute':
+                if ($device instanceof SmartAppliance && isset($params['key'], $params['value'])) {
+                    $device->setAttribute($params['key'], $params['value']);
+                }
+                break;
+            default:
+                return ['error' => 'Invalid action'];
+        }
+        return $device->getDetails();
+    }
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SmartHomeControl/SmartHome/Devices
+namespace App\Agents\SmartHomeControl\SmartHome\Devices;
+final class TV extends SmartDevice
+{
+    public function __construct(
+        string $id,
+        string $name,
+        string $room,
+        protected int $volume = 0,
+        protected string $input = 'HDMI 1',
+    ) {
+        parent::__construct($id, $name, $room);
+    }
+    public function setVolume(int $volume): void
+    {
+        $this->volume = max(0, min(100, $volume));
+    }
+    public function setInput(string $input): void
+    {
+        $this->input = $input;
+    }
+    public function getDetails(): array
+    {
+        return [
+            'status' => $this->status ? 'on' : 'off',
+            'volume' => $this->volume,
+            'input' => $this->input,
+        ];
+    }
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SmartHomeControl/SmartHome/Devices
+namespace App\Agents\SmartHomeControl\SmartHome\Devices;
+final class SmartAppliance extends SmartDevice
+{
+    public function __construct(
+        string $id,
+        string $name,
+        string $room,
+        public readonly string $type,
+        protected array $attributes = [],
+    ) {
+        parent::__construct($id, $name, $room);
+    }
+    public function setAttribute(string $key, $value): void
+    {
+        $this->attributes[$key] = $value;
+    }
+    public function getAttribute(string $key)
+    {
+        return $this->attributes[$key] ?? null;
+    }
+    public function getDetails(): array
+    {
+        return array_merge(
+            ['status' => $this->status ? 'on' : 'off', 'type' => $this->type],
+            $this->attributes,
+        );
+    }
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SmartHomeControl/SmartHome/Devices
+namespace App\Agents\SmartHomeControl\SmartHome\Devices;
+final class Light extends SmartDevice
+{
+    public function __construct(
+        string $id,
+        string $name,
+        string $room,
+        public readonly string $type,
+        protected int $brightness = 0,
+        protected ?string $color = null,
+    ) {
+        parent::__construct($id, $name, $room);
+    }
+    public function setBrightness(int $level): void
+    {
+        $this->brightness = max(0, min(100, $level));
+        $this->status = $this->brightness > 0;
+    }
+    public function setColor(?string $color): void
+    {
+        $this->color = $color;
+    }
+    public function getDetails(): array
+    {
+        return [
+            'type' => $this->type,
+            'status' => $this->status ? 'on' : 'off',
+            'brightness' => $this->brightness,
+            'color' => $this->color,
+        ];
+    }
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SmartHomeControl/SmartHome/Devices
+namespace App\Agents\SmartHomeControl\SmartHome\Devices;
+final class Thermostat extends SmartDevice
+{
+    public function __construct(
+        string $id,
+        string $name,
+        string $room,
+        protected int $temperature = 72,
+        protected string $mode = 'auto',
+    ) {
+        parent::__construct($id, $name, $room, true);
+    }
+    public function setTemperature(int $temperature): void
+    {
+        $this->temperature = $temperature;
+    }
+    public function setMode(string $mode): void
+    {
+        $this->mode = $mode;
+    }
+    public function getDetails(): array
+    {
+        return [
+            'status' => $this->status ? 'on' : 'off',
+            'temperature' => $this->temperature,
+            'mode' => $this->mode,
+        ];
+    }
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SmartHomeControl/SmartHome/Devices
+namespace App\Agents\SmartHomeControl\SmartHome\Devices;
+abstract class SmartDevice
+{
+    public function __construct(
+        public readonly string $id,
+        public readonly string $name,
+        public readonly string $room,
+        protected bool $status = false,
+    ) {}
+    public function turnOn(): void
+    {
+        $this->status = true;
+    }
+    public function turnOff(): void
+    {
+        $this->status = false;
+    }
+    public function getStatus(): bool
+    {
+        return $this->status;
+    }
+    abstract public function getDetails(): array;
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SmartHomeControl
+namespace App\Agents\SmartHomeControl;
+use LLM\Agents\Agent\Agent;
+use LLM\Agents\Agent\AgentAggregate;
+use LLM\Agents\Solution\MetadataType;
+use LLM\Agents\Solution\Model;
+use LLM\Agents\Solution\SolutionMetadata;
+use LLM\Agents\Solution\ToolLink;
+final class SmartHomeControlAgent extends AgentAggregate
+{
+    public const NAME = 'smart_home_control';
+    public static function create(): self
+    {
+        $agent = new Agent(
+            key: self::NAME,
+            name: 'Smart Home Control Assistant',
+            description: 'This agent manages and controls various smart home devices across multiple rooms, including lights, fireplaces, and TVs.',
+            instruction: 'You are a Smart Home Control Assistant. Your primary goal is to help users manage their smart home devices efficiently.',
+        );
+        $aggregate = new self($agent);
+        $aggregate->addMetadata(
+            new SolutionMetadata(
+                type: MetadataType::Memory,
+                key: 'room_validation',
+                content: 'Important! Before request devices in any room, use the get_room_list tool to know correct room names.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Memory,
+                key: 'energy_efficiency',
+                content: 'Remember to suggest energy-efficient settings when appropriate.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Memory,
+                key: 'device_status',
+                content: 'Important! Check device status before performing any action. Because a state can be changed by another user or system.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Memory,
+                key: 'home_name',
+                content: 'We are currently in the "Home" home.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Configuration,
+                key: 'max_tokens',
+                content: 3000,
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Prompt,
+                key: 'query_devices',
+                content: 'What devices are in the living room?',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Prompt,
+                key: 'control_light',
+                content: 'Turn on the lights in the bedroom.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Prompt,
+                key: 'control_fireplace',
+                content: 'Set the fireplace in the living room to medium intensity.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Prompt,
+                key: 'control_tv',
+                content: 'Today is rainy. I\'m in the living room and in a bad mood, could you do something to cheer me up?',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Prompt,
+                key: 'check_device_status',
+                content: 'Is the kitchen light on?',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Prompt,
+                key: 'control_multiple_devices',
+                content: 'Turn off all devices in the master bedroom.',
+            ),
+        );
+        $model = new Model(model: 'gpt-4o-mini');
+        $aggregate->addAssociation($model);
+        $aggregate->addAssociation(new ToolLink(name: ListRoomDevicesTool::NAME));
+        $aggregate->addAssociation(new ToolLink(name: GetDeviceDetailsTool::NAME));
+        $aggregate->addAssociation(new ToolLink(name: ControlDeviceTool::NAME));
+        $aggregate->addAssociation(new ToolLink(name: GetRoomListTool::NAME));
+        return $aggregate;
+    }
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SmartHomeControl
+namespace App\Agents\SmartHomeControl;
+use App\Agents\SmartHomeControl\SmartHome\SmartHomeSystem;
+use App\Domain\Tool\PhpTool;
+/**
+ * @extends  PhpTool<GetRoomListInput>
+ */
+final class GetRoomListTool extends PhpTool
+{
+    public const NAME = 'get_room_list';
+    public function __construct(
+        private readonly SmartHomeSystem $smartHome,
+    ) {
+        parent::__construct(
+            name: self::NAME,
+            inputSchema: GetRoomListInput::class,
+            description: 'Retrieves a list of all room names in the smart home system.',
+        );
+    }
+    public function execute(object $input): string
+    {
+        $rooms = $this->smartHome->getRoomList();
+        return \json_encode([
+            'rooms' => $rooms,
+        ]);
+    }
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SmartHomeControl
+namespace App\Agents\SmartHomeControl;
+use LLM\Agents\Agent\AgentFactoryInterface;
+use LLM\Agents\Agent\AgentInterface;
+final class SmartHomeControlAgentFactory implements AgentFactoryInterface
+{
+    public function create(): AgentInterface
+    {
+        return SmartHomeControlAgent::create();
+    }
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SmartHomeControl
+namespace App\Agents\SmartHomeControl;
+use Spiral\JsonSchemaGenerator\Attribute\Field;
+final class DeviceParam
+{
+    public function __construct(
+        #[Field(title: 'Param name', description: 'The name of the parameter')]
+        public string $name,
+        #[Field(title: 'Param value', description: 'The value of the parameter')]
+        public string $value,
+    ) {}
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/CodeReviewer
+namespace App\Agents\CodeReviewer;
+use LLM\Agents\Agent\Agent;
+use LLM\Agents\Agent\AgentAggregate;
+use LLM\Agents\Solution\MetadataType;
+use LLM\Agents\Solution\Model;
+use LLM\Agents\Solution\SolutionMetadata;
+use LLM\Agents\Solution\ToolLink;
+final class CodeReviewAgent extends AgentAggregate
+{
+    public static function create(): self
+    {
+        $agent = new Agent(
+            key: 'code_review',
+            name: 'Code Reviewer',
+            description: 'Agent can list files in project with given id and then open each file and review the code',
+            instruction: 'You are a code review assistant. Use the provided tools to list project files, read their contents, and submit a code review for each file.',
+        );
+        $aggregate = new self($agent);
+        $aggregate->addMetadata(
+            new SolutionMetadata(
+                type: MetadataType::Memory,
+                key: 'user_submitted_code_review',
+                content: 'Always submit code reviews using proper tool.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Memory,
+                key: 'code_review_tip',
+                content: 'Always submit constructive feedback and suggestions for improvement in your code reviews.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Memory,
+                key: 'customer_name',
+                content: 'If you know the customer name say hello to them.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Configuration,
+                key: 'max_tokens',
+                content: 3000,
+            ),
+        );
+        $model = new Model(model: 'gpt-4o-mini');
+        $aggregate->addAssociation($model);
+        $aggregate->addAssociation(new ToolLink(name: ListProjectTool::NAME));
+        $aggregate->addAssociation(new ToolLink(name: ReadFileTool::NAME));
+        $aggregate->addAssociation(new ToolLink(name: ReviewTool::NAME));
+        return $aggregate;
+    }
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/CodeReviewer
+namespace App\Agents\CodeReviewer;
+use Spiral\JsonSchemaGenerator\Attribute\Field;
+final class ListProjectInput
+{
+    public function __construct(
+        #[Field(title: 'Project Name', description: 'The name of the project to list files from.')]
+        public string $name,
+    ) {}
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/CodeReviewer
+namespace App\Agents\CodeReviewer;
+use Spiral\JsonSchemaGenerator\Attribute\Field;
+final class ReviewInput
+{
+    public function __construct(
+        #[Field(title: 'Project Name', description: 'The name of the project.')]
+        public string $name,
+        #[Field(title: 'File Path', description: 'The path of the file being reviewed.')]
+        public string $path,
+        #[Field(title: 'Review Result', description: 'Code diff with suggested changes.')]
+        public string $result,
+    ) {}
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/CodeReviewer
+namespace App\Agents\CodeReviewer;
+use Spiral\JsonSchemaGenerator\Attribute\Field;
+final class ReadFileInput
+{
+    public function __construct(
+        #[Field(title: 'File Path', description: 'The path of the file to read.')]
+        public string $path,
+    ) {}
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/CodeReviewer
+namespace App\Agents\CodeReviewer;
+use App\Domain\Tool\PhpTool;
+/**
+ * @extends PhpTool<ListProjectInput>
+ */
+final class ListProjectTool extends PhpTool
+{
+    public const NAME = 'list_project';
+    public function __construct()
+    {
+        parent::__construct(
+            name: self::NAME,
+            inputSchema: ListProjectInput::class,
+            description: 'List all files in a project with the given project name.',
+        );
+    }
+    public function execute(object $input): string
+    {
+        // Implementation to list project files
+        return json_encode(['files' => ['file1.php', 'file2.php']]);
+    }
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/CodeReviewer
+namespace App\Agents\CodeReviewer;
+use App\Domain\Tool\PhpTool;
+/**
+ * @extends  PhpTool<ReviewInput>
+ */
+final class ReviewTool extends PhpTool
+{
+    public const NAME = 'submit_review';
+    public function __construct()
+    {
+        parent::__construct(
+            name: self::NAME,
+            inputSchema: ReviewInput::class,
+            description: 'Submit a code review for a pull request. Call this whenever you need to submit a code review for a pull request.',
+        );
+    }
+    public function execute(object $input): string
+    {
+        // Implementation to submit code review
+        return json_encode(['status' => 'OK']);
+    }
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/CodeReviewer
+namespace App\Agents\CodeReviewer;
+use LLM\Agents\Agent\AgentFactoryInterface;
+use LLM\Agents\Agent\AgentInterface;
+final class CodeReviewAgentFactory implements AgentFactoryInterface
+{
+    public function create(): AgentInterface
+    {
+        return CodeReviewAgent::create();
+    }
+}
+///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/CodeReviewer
+namespace App\Agents\CodeReviewer;
+use App\Domain\Tool\PhpTool;
+/**
+ * @extends PhpTool<ReadFileInput>
+ */
+final class ReadFileTool extends PhpTool
+{
+    public const NAME = 'read_file';
+    public function __construct()
+    {
+        parent::__construct(
+            name: self::NAME,
+            inputSchema: ReadFileInput::class,
+            description: 'Read the contents of a file at the given path.',
+        );
+    }
+    public function execute(object $input): string
+    {
+        if ($input->path === 'file1.php') {
+            return json_encode([
+                'content' => <<<'PHP'
+class ReviewTool extends \App\Domain\Tool\Tool
+{
+    public function __construct()
+    {
+        parent::__construct(
+            name: 'review'
+            inputSchema: ReviewInput::class,
+            description: 'Submit a code review for a file at the given path.',
+        );
+    }
+    public function getLanguage(): \App\Domain\Tool\ToolLanguage
+    {
+        return \App\Domain\Tool\ToolLanguage::PHP;
+    }
+    public function execute(object $input): string
+    {
+        // Implementation to submit code review
+        return json_encode(['status' => 'success', 'message' => 'Code review submitted']);
+    }
+}
+PHP,
+            ]);
+        }
+        if ($input->path === 'file2.php') {
+            return json_encode([
+                'content' => <<<'PHP'
+class ReadFileTool extends \App\Domain\Tool\Tool
+{
+    public function __construct()
+    {
+        parent::__construct(
+            name: 'read_file',
+            inputSchema: ReadFileInput::class,
+            description: 'Read the contents of a file at the given path.',
+        );
+    }
+    public function getLanguage(): \App\Domain\Tool\ToolLanguage
+    {
+        return \App\Domain\Tool\ToolLanguage:PHP;
+    }
+    public function execute(object $input): string
+    {
+        // Implementation to read file contents
+        return json_encode(['content' => 'File contents here']);
+    }
+}
+PHP,
+            ]);
+        }
+        return 'File not found';
+    }
+}

@@ -182,6 +182,102 @@ The sample app comes with several pre-configured agents, each designed for speci
     - Assign task priorities
     - Generate detailed subtasks
 
+## Knowledge Base
+
+This sample project includes a console command to generate a knowledge base, which can be useful for creating project
+documentation or training data for AI models like Claude.
+
+### Creating a Project in Claude
+
+Follow these steps to create a new project in Claude using the generated knowledge base:
+
+1. Create a New Project
+    - Go to the Claude interface (e.g., chat.openai.com for ChatGPT).
+    - Create a new project.
+
+2. Add Instructions from README below
+
+3. Upload Knowledge Base Files
+    - Locate the `./knowledge-base` directory on your local machine.
+    - Upload all files from this directory to Claude.
+    - Ensure all relevant PHP files, documentation, and any other project-related files are included.
+
+4. Test Your Project
+    - To test if everything is set up correctly, ask Claude to create a "Weather Checker" agent.
+    - Review the generated code and explanations provided by Claude.
+
+### Instructing an AI with
+
+Once you've generated the knowledge base, you can use it to create new agent codebases or to provide context for
+AI-assisted development. Here's an example of how you might use the generated knowledge base to instruct an AI:
+
+```prompt
+Create a new AI agent with the following specifications:
+
+1. Agent Name: [Provide a descriptive name for the agent]
+2. Agent Unique Key: [Provide a unique identifier for the agent, using lowercase letters, numbers, and underscores]
+3. Agent Description: [Provide a detailed description of the agent's purpose, capabilities, and use cases]
+4. Agent Instruction: [Provide a detailed instruction for the agent, explaining how it should behave, what its primary goals are, and any specific guidelines it should follow]
+5. Tools: List the tools that would be useful for this agent. For each tool, provide:
+   a. Tool Key: [A unique identifier for the tool]
+   b. Tool Description: [A concise yet comprehensive explanation of the tool's functionality]
+   c. Tool Input Schema: [Describe the input parameters for the tool in JSON format]
+
+Example Tool Format:
+{
+    "key": "example_tool",
+    "description": "This tool performs X function, useful for Y scenarios. It takes A and B as inputs and returns Z.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "param1": {
+                "type": "string",
+                "description": "Description of param1"
+            },
+            "param2": {
+                "type": "integer",
+                "description": "Description of param2"
+            }
+        },
+        "required": ["param1", "param2"]
+    }
+}
+
+6. Agent Memory: [List any specific information or guidelines that the agent should always keep in mind]
+7. Agent example prompts
+8. Always use gpt-4o-mini model as a bae model for the agent
+
+Your tasks:
+* Generate all necessary PHP classes for Agent
+	* Agent
+	* AgentFactory
+	* All necessary tools
+	* All necessary Tool input shemas
+- You use PHP 8.3 with Constructor property promotion, named arguments, and do not use annotations.
+```
+
+By providing such instructions along with the generated knowledge base, you can guide AI models like Claude to create
+new components that align with your project's structure and coding standards.
+
+### Generating the Knowledge Base
+
+To generate the knowledge base, run the following command:
+
+```bash
+php app.php kb:generate
+```
+
+This command will create a knowledge base in the `./knowledge-base` directory. The generated knowledge base contains
+documentation and codebase examples that can be used, for instance, to create a project for Claude AI.
+
+### Extending the Knowledge Base
+
+As your project grows, you may want to update the knowledge base to include new features, agents, or tools. Simply run
+the `kb:generate` command again to refresh the knowledge base with the latest changes in your project.
+
+This approach allows for an iterative development process where you can continuously improve and expand your agent
+ecosystem, leveraging both human expertise and AI assistance.
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
