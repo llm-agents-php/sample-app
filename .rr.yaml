@@ -9,6 +9,8 @@ kv:
     config: { }
 
 server:
+  on_init:
+    command: 'php app.php migrate'
   command: 'php app.php'
   relay: pipes
 

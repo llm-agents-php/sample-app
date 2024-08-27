@@ -72,14 +72,6 @@ To start the RoadRunner server and the Dolt database, run:
 ./rr serve
 ```
 
-### Running Migrations
-
-After starting the server, run the database migrations:
-
-```bash
-php app.php migrate
-```
-
 ### Chatting with Agents
 
 To start a chat session with an AI agent:
