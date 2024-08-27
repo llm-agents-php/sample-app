@@ -7,7 +7,6 @@ namespace App\Domain\Chat;
 use App\Application\Entity\Uuid;
 use App\Domain\Agent\AgentExecutorBuilder;
 use App\Domain\Chat\Exception\ChatNotFoundException;
-use App\Infrastructure\OpenAI\StreamChunkCallback;
 use LLM\Agents\Agent\AgentRepositoryInterface;
 use LLM\Agents\Agent\Exception\AgentNotFoundException;
 use LLM\Agents\Agent\Execution;

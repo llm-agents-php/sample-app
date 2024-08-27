@@ -12,6 +12,7 @@
         "internal/dload": "^0.2.2",
         "llm-agents/agent-site-status-checker": "dev-main",
         "llm-agents/agents": "^1.0",
+        "llm-agents/openai-client": "^1.0",
         "nesbot/carbon": "^3.4",
         "nyholm/psr7": "^1.8",
         "openai-php/client": "^0.10.1",

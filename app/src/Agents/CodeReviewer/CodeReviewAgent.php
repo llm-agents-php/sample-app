@@ -6,6 +6,8 @@ namespace App\Agents\CodeReviewer;
 
 use LLM\Agents\Agent\Agent;
 use LLM\Agents\Agent\AgentAggregate;
+use LLM\Agents\OpenAI\Client\OpenAIModel;
+use LLM\Agents\OpenAI\Client\Option;
 use LLM\Agents\Solution\MetadataType;
 use LLM\Agents\Solution\Model;
 use LLM\Agents\Solution\SolutionMetadata;
@@ -42,12 +44,12 @@ final class CodeReviewAgent extends AgentAggregate
             ),
             new SolutionMetadata(
                 type: MetadataType::Configuration,
-                key: 'max_tokens',
+                key: Option::MaxTokens->value,
                 content: 3000,
             ),
         );
 
-        $model = new Model(model: 'gpt-4o-mini');
+        $model = new Model(model: OpenAIModel::Gpt4oMini->value);
         $aggregate->addAssociation($model);
 
         $aggregate->addAssociation(new ToolLink(name: ListProjectTool::NAME));

@@ -8,6 +8,7 @@ use App\Agents\AgentsCaller\AskAgentTool;
 use LLM\Agents\Agent\Agent;
 use LLM\Agents\Agent\AgentAggregate;
 use LLM\Agents\Agent\SiteStatusChecker\SiteStatusCheckerAgent;
+use LLM\Agents\OpenAI\Client\OpenAIModel;
 use LLM\Agents\Solution\AgentLink;
 use LLM\Agents\Solution\MetadataType;
 use LLM\Agents\Solution\Model;
@@ -77,7 +78,7 @@ final class DeliveryAgent extends AgentAggregate
         );
 
         // Add a model to the agent
-        $model = new Model(model: 'gpt-4o-mini');
+        $model = new Model(model: OpenAIModel::Gpt4oMini->value);
         $aggregate->addAssociation($model);
 
         $aggregate->addAssociation(new ToolLink(name: GetDeliveryDateTool::NAME));

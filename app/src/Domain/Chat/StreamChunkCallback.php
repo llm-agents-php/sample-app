@@ -2,10 +2,11 @@
 
 declare(strict_types=1);
 
-namespace App\Infrastructure\OpenAI;
+namespace App\Domain\Chat;
 
 use App\Application\Entity\Uuid;
 use App\Domain\Chat\Event\MessageChunk;
+use LLM\Agents\OpenAI\Client\StreamChunkCallbackInterface;
 use Psr\EventDispatcher\EventDispatcherInterface;
 
 final readonly class StreamChunkCallback implements StreamChunkCallbackInterface

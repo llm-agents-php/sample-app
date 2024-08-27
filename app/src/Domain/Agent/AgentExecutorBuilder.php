@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace App\Domain\Agent;
 
-use App\Infrastructure\OpenAI\Option;
-use App\Infrastructure\OpenAI\StreamChunkCallbackInterface;
 use LLM\Agents\Agent\AgentExecutor;
 use LLM\Agents\Agent\Exception\InvalidBuilderStateException;
 use LLM\Agents\Agent\Execution;
@@ -13,6 +11,8 @@ use LLM\Agents\LLM\OptionsFactoryInterface;
 use LLM\Agents\LLM\OptionsInterface;
 use LLM\Agents\LLM\Prompt\Chat\MessagePrompt;
 use LLM\Agents\LLM\Prompt\Chat\Prompt;
+use LLM\Agents\OpenAI\Client\Option;
+use LLM\Agents\OpenAI\Client\StreamChunkCallbackInterface;
 
 final class AgentExecutorBuilder
 {

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Application;
 
 use LLM\Agents\Agent\SiteStatusChecker\Bootloader\SiteStatusCheckerBootloader;
+use LLM\Agents\OpenAI\Client\Bootloader\OpenAIClientBootloader;
 use Spiral\Boot\Bootloader\CoreBootloader;
 use Spiral\DotEnv\Bootloader\DotenvBootloader;
 use Spiral\Prototype\Bootloader\PrototypeBootloader;
@@ -32,8 +33,7 @@ class Kernel extends \Spiral\Framework\Kernel
             Bootloader\Infrastructure\SecurityBootloader::class,
             Bootloader\Infrastructure\CycleOrmBootloader::class,
             Bootloader\Infrastructure\ValinorBootloader::class,
-            Bootloader\Infrastructure\OpenAIBootloader::class,
-
+            OpenAIClientBootloader::class,
             // Prototyping
             PrototypeBootloader::class,
 
