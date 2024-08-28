@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Application;
 
 use LLM\Agents\Agent\SiteStatusChecker\Bootloader\SiteStatusCheckerBootloader;
+use LLM\Agents\JsonSchema\Mapper\Bootloader\SchemaMapperBootloader;
 use LLM\Agents\OpenAI\Client\Bootloader\OpenAIClientBootloader;
 use Spiral\Boot\Bootloader\CoreBootloader;
 use Spiral\DotEnv\Bootloader\DotenvBootloader;
@@ -32,8 +33,6 @@ class Kernel extends \Spiral\Framework\Kernel
             Bootloader\Infrastructure\CloudStorageBootloader::class,
             Bootloader\Infrastructure\SecurityBootloader::class,
             Bootloader\Infrastructure\CycleOrmBootloader::class,
-            Bootloader\Infrastructure\ValinorBootloader::class,
-            OpenAIClientBootloader::class,
             // Prototyping
             PrototypeBootloader::class,
 
@@ -45,6 +44,8 @@ class Kernel extends \Spiral\Framework\Kernel
             Bootloader\SmartHomeBootloader::class,
 
             // Agents
+            OpenAIClientBootloader::class,
+            SchemaMapperBootloader::class,
             SiteStatusCheckerBootloader::class,
         ];
     }
