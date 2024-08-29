@@ -35,6 +35,8 @@ final class ListRoomDevicesTool extends PhpTool
                 'name' => $device->name,
                 'type' => get_class($device),
                 'status' => $device->getStatus() ? 'on' : 'off',
+                'params' => $device->getDetails(),
+                'controlSchema' => $device->getControlSchema(),
             ];
         }
 

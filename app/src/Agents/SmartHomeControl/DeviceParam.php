@@ -9,9 +9,9 @@ use Spiral\JsonSchemaGenerator\Attribute\Field;
 final class DeviceParam
 {
     public function __construct(
-        #[Field(title: 'Param name', description: 'The name of the parameter')]
+        #[Field(title: 'Attribute name', description: 'The name of the parameter')]
         public string $name,
-        #[Field(title: 'Param value', description: 'The value of the parameter')]
+        #[Field(title: 'Attribute value', description: 'The value of the parameter')]
         public string $value,
     ) {}
 }

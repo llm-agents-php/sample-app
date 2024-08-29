@@ -26,15 +26,16 @@ final class ControlDeviceTool extends PhpTool
 
     public function execute(object $input): string
     {
-        $result = $this->smartHome->controlDevice($input->deviceId, $input->action, $input->params);
+        try {
+            $result = $this->smartHome->controlDevice($input->deviceId, $input->action, $input->params);
 
-        if (isset($result['error'])) {
-            return json_encode(['error' => $result['error']]);
+            return json_encode([
+                'id' => $input->deviceId,
+                'action' => $input->action->value,
+                'result' => $result,
+            ]);
+        } catch (\InvalidArgumentException $e) {
+            return json_encode(['error' => $e->getMessage()]);
         }
-
-        return json_encode([
-            'id' => $input->deviceId,
-            'action' => $input->action,
-        ]);
     }
 }
