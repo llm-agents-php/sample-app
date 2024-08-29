@@ -65,8 +65,8 @@ final class ChatWindowCommand extends Command
                         $this->newLine();
                     }
                 } elseif ($message instanceof Message) {
-                    $this->write($message->message);
-                    $this->newLine();
+//                    $this->write($message->message);
+//                    $this->newLine();
                 } elseif ($message instanceof Question) {
                     $this->newLine();
                     $this->io->block(\sprintf('> User: %s', $message->message), style: 'info');
