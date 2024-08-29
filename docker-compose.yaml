@@ -2,6 +2,6 @@ version: '3.7'
 
 services:
   app:
-    build: "./.docker"
+    image: ghcr.io/llm-agents-php/sample-app:1.0.0
     environment:
       OPENAI_KEY: ${OPENAI_KEY}

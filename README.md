@@ -24,43 +24,49 @@ package.
 - Git
 - OpenAI API key
 
-## Installation
+## Quick Start with Docker
 
-1. Clone the repository:
+The easiest way to run the app is using our pre-built Docker image.
 
-```bash
-git clone https://github.com/llm-agents-php/sample-app.git
-cd sample-app
-```
+**Follow these steps to get started:**
 
-2. Install dependencies:
+1. Make sure you have Docker installed on your system.
 
-```bash
-composer install
-```
-
-3. Set up the environment:
+2. Run the Docker container with the following command:
 
 ```bash
-cp .env.sample .env
+docker run --name chat-app -e OPENAI_KEY=<your_api_key> ghcr.io/llm-agents-php/sample-app:1.0.0
 ```
 
-Open the `.env` file and add your OpenAI API key:
+or if you want to get environment variables from a file:
+
+```bash
+docker run --name chat-app --env-file .env ghcr.io/llm-agents-php/sample-app:1.0.0
+```
+
+and `.env` file should look like this:
 
 ```bash
 OPENAI_KEY=your_api_key_here
 ```
 
-4. Initialize the project:
+> Replace `<your_api_key>` with your OpenAI API key.
+
+3. Once the container is running, you can interact with the app using the following command:
+
+**Start the chat app:**
 
 ```bash
-make init
+docker exec -it chat-app php app.php chat
 ```
 
-This command will download and set up all required binaries, including:
+**Open the chat session:**
 
-- Dolt: A SQL database server
-- RoadRunner: A high-performance PHP application server
+```bash
+docker exec -it chat-app php app.php chat:session <session_uuid> -v
+````
+
+> Replace `<session_uuid>` with the actual session UUID.
 
 ## Usage
 
@@ -173,6 +179,46 @@ The sample app comes with several pre-configured agents, each designed for speci
     - Create hierarchical task structures
     - Assign task priorities
     - Generate detailed subtasks
+
+
+## Dev installation
+
+1. Clone the repository:
+
+```bash
+git clone https://github.com/llm-agents-php/sample-app.git
+cd sample-app
+```
+
+2. Install dependencies:
+
+```bash
+composer install
+```
+
+3. Set up the environment:
+
+```bash
+cp .env.sample .env
+```
+
+Open the `.env` file and add your OpenAI API key:
+
+```bash
+OPENAI_KEY=your_api_key_here
+```
+
+4. Initialize the project:
+
+```bash
+make init
+```
+
+This command will download and set up all required binaries, including:
+
+- Dolt: A SQL database server
+- RoadRunner: A high-performance PHP application server
+
 
 ## Knowledge Base
 
