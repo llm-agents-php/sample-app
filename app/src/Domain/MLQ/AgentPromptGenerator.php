@@ -39,21 +39,11 @@ Important rules:
 - think before responding to user
 PROMPT,
                 ),
-                values: ['prompt' => $agent->getInstruction()],
             ),
 
             // Agent memory
             MessagePrompt::system(
-                prompt: 'Instructions about your experiences, follow them: {memory}',
-                values: [
-                    'memory' => \implode(
-                        "\n",
-                        \array_map(
-                            static fn(SolutionMetadata $metadata) => $metadata->content,
-                            $agent->getMemory(),
-                        ),
-                    ),
-                ],
+                prompt: 'Instructions about your experiences, follow them: {memory}. And also {dynamic_memory}',
             ),
         ];
 
@@ -74,26 +64,12 @@ Use the `ask_agent` tool and provide the agent key.
 Always follow rules:
 - Don't make up the agent key. Use only the ones from the provided list.
 PROMPT,
-                values: [
-                    'associated_agents' => \implode(
-                        PHP_EOL,
-                        \array_map(
-                            static fn(array $agent): string => \json_encode([
-                                'key' => $agent['agent']->getKey(),
-                                'description' => $agent['agent']->getDescription(),
-                                'output_schema' => $agent['output_schema'],
-                            ]),
-                            $associatedAgents,
-                        ),
-                    ),
-                ],
             );
         }
 
         if ($sessionContext !== null) {
             $messages[] = MessagePrompt::system(
                 prompt: 'Session context: {active_context}',
-                values: ['active_context' => \json_encode($sessionContext)],
             );
         }
 
@@ -105,6 +81,28 @@ PROMPT,
 
         return new Prompt(
             messages: $messages,
+            variables: [
+                'prompt' => $agent->getInstruction(),
+                'active_context' => \json_encode($sessionContext),
+                'associated_agents' => \implode(
+                    PHP_EOL,
+                    \array_map(
+                        static fn(array $agent): string => \json_encode([
+                            'key' => $agent['agent']->getKey(),
+                            'description' => $agent['agent']->getDescription(),
+                            'output_schema' => $agent['output_schema'],
+                        ]),
+                        $associatedAgents,
+                    ),
+                ),
+                'memory' => \implode(
+                    "\n",
+                    \array_map(
+                        static fn(SolutionMetadata $metadata) => $metadata->content,
+                        $agent->getMemory(),
+                    ),
+                ),
+            ],
         );
     }
 }
