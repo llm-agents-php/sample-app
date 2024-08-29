@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Agents\SmartHomeControl;
 
+use App\Agents\DynamicMemoryTool\DynamicMemoryTool;
 use LLM\Agents\Agent\Agent;
 use LLM\Agents\Agent\AgentAggregate;
 use LLM\Agents\OpenAI\Client\OpenAIModel;
@@ -23,7 +24,11 @@ final class SmartHomeControlAgent extends AgentAggregate
             key: self::NAME,
             name: 'Smart Home Control Assistant',
             description: 'This agent manages and controls various smart home devices across multiple rooms, including lights, fireplaces, and TVs.',
-            instruction: 'You are a Smart Home Control Assistant. Your primary goal is to help users manage their smart home devices efficiently.',
+            instruction: <<<'INSTRUCTION'
+You are a Smart Home Control Assistant.
+Your primary goal is to help users manage their smart home devices efficiently.
+INSTRUCTION
+            ,
         );
 
         $aggregate = new self($agent);
@@ -48,6 +53,11 @@ final class SmartHomeControlAgent extends AgentAggregate
                 type: MetadataType::Memory,
                 key: 'home_name',
                 content: 'We are currently in the "Home" home.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Memory,
+                key: 'store_important_memory',
+                content: 'Store important information in memory for future reference. For example if user tells that he likes some specific setting, store it in memory.',
             ),
 
             new SolutionMetadata(
@@ -95,6 +105,7 @@ final class SmartHomeControlAgent extends AgentAggregate
         $aggregate->addAssociation(new ToolLink(name: GetDeviceDetailsTool::NAME));
         $aggregate->addAssociation(new ToolLink(name: ControlDeviceTool::NAME));
         $aggregate->addAssociation(new ToolLink(name: GetRoomListTool::NAME));
+        $aggregate->addAssociation(new ToolLink(name: DynamicMemoryTool::NAME));
 
         return $aggregate;
     }
