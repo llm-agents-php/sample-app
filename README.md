@@ -54,29 +54,7 @@ OPENAI_KEY=your_api_key_here
 
 3. Once the container is running, you can interact with the app using the following command:
 
-**Start the chat app:**
-
-```bash
-docker exec -it chat-app php app.php chat
-```
-
-**Open the chat session:**
-
-```bash
-docker exec -it chat-app php app.php chat:session <session_uuid> -v
-````
-
-> Replace `<session_uuid>` with the actual session UUID.
-
 ## Usage
-
-### Starting the Server
-
-To start the RoadRunner server and the Dolt database, run:
-
-```bash
-./rr serve
-```
 
 ### Chatting with Agents
 
@@ -84,6 +62,12 @@ To start a chat session with an AI agent:
 
 1. Run the following command:
 
+**Using docker container**
+```bash
+docker exec -it chat-app php app.php chat
+```
+
+**Using local installation**
 ```bash
 php app.php chat
 ```
@@ -101,8 +85,15 @@ php app.php chat
 *     Run the following command to see the AI response     *
 ************************************************************
 
-php app.php chat:session 01918b72-6433-71bd-8116-c1d76175a241 -v
+php app.php chat:session <session_uuid> -v
 ```
+
+**Using docker container**
+```bash
+docker exec -it chat-app php app.php chat:session <session_uuid> -v
+````
+> Replace `<session_uuid>` with the actual session UUID.
+
 
 4. Copy the provided command and run it in a new terminal tab. This command will show the AI response to your message.
 
@@ -219,6 +210,13 @@ This command will download and set up all required binaries, including:
 - Dolt: A SQL database server
 - RoadRunner: A high-performance PHP application server
 
+### Starting the Server
+
+To start the RoadRunner server and the Dolt database, run:
+
+```bash
+./rr serve
+```
 
 ## Knowledge Base
 
