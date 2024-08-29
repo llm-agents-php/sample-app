@@ -1,3 +1,26 @@
+###########################
+# Docker                  #
+###########################
+start:
+	docker compose up --remove-orphans -d;
+
+up: start
+
+stop:
+	docker compose stop;
+
+down:
+	docker compose down;
+
+restart:
+	docker compose restart;
+
+bash:
+	docker compose exec app /bin/sh;
+
+###########################
+# Local development       #
+###########################
 init: init-db init-rr
 
 # Install dolt database
@@ -21,6 +44,3 @@ init-rr:
 
 clear-cache:
 	rm -rf runtime/cache;
-
-start:
-	./rr serve

@@ -10,7 +10,7 @@ kv:
 
 server:
   on_init:
-    command: 'php app.php migrate'
+    command: 'php app.php migrate --force'
   command: 'php app.php'
   relay: pipes
 
