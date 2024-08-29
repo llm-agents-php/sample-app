@@ -14,7 +14,7 @@ final readonly class ControlDeviceInput
         public string $deviceId,
 
         #[Field(title: 'Action', description: 'The action to perform on the device (e.g., turnOn, turnOff, setBrightness)')]
-        public string $action,
+        public DeviceAction $action,
 
         /**
          * @var array<DeviceParam>

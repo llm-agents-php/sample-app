@@ -9,6 +9,7 @@ use App\Agents\SmartHomeControl\SmartHome\Devices\SmartAppliance;
 use App\Agents\SmartHomeControl\SmartHome\Devices\Thermostat;
 use App\Agents\SmartHomeControl\SmartHome\Devices\TV;
 use App\Agents\SmartHomeControl\SmartHome\SmartHomeSystem;
+use Psr\SimpleCache\CacheInterface;
 use Spiral\Boot\Bootloader\Bootloader;
 
 final class SmartHomeBootloader extends Bootloader
@@ -16,8 +17,10 @@ final class SmartHomeBootloader extends Bootloader
     public function defineSingletons(): array
     {
         return [
-            SmartHomeSystem::class => static function (): SmartHomeSystem {
-                $smartHome = new SmartHomeSystem();
+            SmartHomeSystem::class => static function (
+                CacheInterface $cache,
+            ): SmartHomeSystem {
+                $smartHome = new SmartHomeSystem($cache);
 
                 // Living Room Devices
                 $livingRoomAirConditioner = new SmartAppliance(
@@ -26,7 +29,6 @@ final class SmartHomeBootloader extends Bootloader
                     'living_room',
                     'air_conditioner',
                     [
-                        'status' => 'off',
                         'temperature' => 0,
                         'mode' => 'cool',
                     ],
@@ -41,7 +43,6 @@ final class SmartHomeBootloader extends Bootloader
                     'living_room',
                     'fireplace',
                     [
-                        'status' => 'off',
                         'temperature' => 0,
                     ],
                 );
@@ -51,7 +52,6 @@ final class SmartHomeBootloader extends Bootloader
                     'living_room',
                     'speaker',
                     [
-                        'status' => 'off',
                         'volume' => 0,
                         'radio_station' => 'Classical FM',
                     ],
@@ -66,7 +66,6 @@ final class SmartHomeBootloader extends Bootloader
                     'kitchen',
                     'refrigerator',
                     [
-                        'status' => 'on',
                         'temperature' => 37,
                         'mode' => 'normal',
                     ],

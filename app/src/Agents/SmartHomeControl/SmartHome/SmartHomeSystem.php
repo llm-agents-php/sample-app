@@ -4,11 +4,10 @@ declare(strict_types=1);
 
 namespace App\Agents\SmartHomeControl\SmartHome;
 
-use App\Agents\SmartHomeControl\SmartHome\Devices\Light;
-use App\Agents\SmartHomeControl\SmartHome\Devices\SmartAppliance;
+use App\Agents\SmartHomeControl\DeviceAction;
 use App\Agents\SmartHomeControl\SmartHome\Devices\SmartDevice;
-use App\Agents\SmartHomeControl\SmartHome\Devices\Thermostat;
-use App\Agents\SmartHomeControl\SmartHome\Devices\TV;
+use Carbon\CarbonInterval;
+use Psr\SimpleCache\CacheInterface;
 use Spiral\Core\Attribute\Singleton;
 
 #[Singleton]
@@ -17,6 +16,10 @@ final class SmartHomeSystem
     /** @var array<string, SmartDevice> */
     private array $devices = [];
 
+    public function __construct(
+        private readonly CacheInterface $cache,
+    ) {}
+
     public function addDevice(SmartDevice $device): void
     {
         $this->devices[$device->id] = $device;
@@ -24,7 +27,9 @@ final class SmartHomeSystem
 
     public function getDevice(string $id): ?SmartDevice
     {
-        return $this->devices[$id] ?? null;
+        $device = $this->cache->get('device_' . $id, $this->devices[$id] ?? null);
+
+        return $device;
     }
 
     public function getRoomList(): array
@@ -36,62 +41,45 @@ final class SmartHomeSystem
 
     public function getRoomDevices(string $room): array
     {
-        return \array_filter($this->devices, static fn($device): bool => $device->room === $room);
+        return \array_filter($this->getCachedDevices(), static fn($device): bool => $device->room === $room);
     }
 
-    public function controlDevice(string $id, string $action, array $params = []): array
+    private function getCachedDevices(): array
+    {
+        $devices = [];
+        foreach ($this->devices as $id => $device) {
+            $devices[$id] = $this->getDevice($id);
+        }
+
+        return \array_filter($devices);
+    }
+
+    public function controlDevice(string $id, DeviceAction $action, array $params = []): array
     {
         $device = $this->getDevice($id);
-        if (!$device) {
+        if ($device === null) {
             return ['error' => 'Device not found'];
         }
 
-        switch ($action) {
-            case 'turnOn':
-                $device->turnOn();
-                break;
-            case 'turnOff':
-                $device->turnOff();
-                break;
-            case 'setBrightness':
-                if ($device instanceof Light && isset($params['brightness'])) {
-                    $device->setBrightness($params['brightness']);
-                }
-                break;
-            case 'setColor':
-                if ($device instanceof Light && isset($params['color'])) {
-                    $device->setColor($params['color']);
-                }
-                break;
-            case 'setTemperature':
-                if ($device instanceof Thermostat && isset($params['temperature'])) {
-                    $device->setTemperature($params['temperature']);
-                }
-                break;
-            case 'setThermostatMode':
-                if ($device instanceof Thermostat && isset($params['mode'])) {
-                    $device->setMode($params['mode']);
-                }
-                break;
-            case 'setTVVolume':
-                if ($device instanceof TV && isset($params['volume'])) {
-                    $device->setVolume($params['volume']);
-                }
-                break;
-            case 'setTVInput':
-                if ($device instanceof TV && isset($params['input'])) {
-                    $device->setInput($params['input']);
-                }
-                break;
-            case 'setApplianceAttribute':
-                if ($device instanceof SmartAppliance && isset($params['key'], $params['value'])) {
-                    $device->setAttribute($params['key'], $params['value']);
-                }
-                break;
-            default:
-                return ['error' => 'Invalid action'];
-        }
+        $this->cache->set(
+            'device_' . $id,
+            $device->executeAction($action, $params),
+            CarbonInterval::hour(),
+        );
 
-        return $device->getDetails();
+        $this->cache->set('last_action', \time(), CarbonInterval::hour());
+
+        return [
+            'id' => $device->id,
+            'name' => $device->name,
+            'room' => $device->room,
+            'type' => \get_class($device),
+            'params' => $device->getDetails(),
+        ];
+    }
+
+    public function getLastActionTime(): ?int
+    {
+        return $this->cache->get('last_action') ?? null;
     }
 }

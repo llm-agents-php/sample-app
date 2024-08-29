@@ -13,6 +13,7 @@ use Spiral\Cache\CacheStorageProviderInterface;
 use Spiral\Console\Attribute\AsCommand;
 use Spiral\Console\Command;
 use Spiral\Console\Console;
+use Symfony\Component\Console\Cursor;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
 #[AsCommand(
@@ -23,6 +24,8 @@ final class ChatCommand extends Command
 {
     private Uuid $sessionUuid;
     private SymfonyStyle $io;
+    private bool $firstMessage = true;
+    private bool $lastMessageCustom = false;
 
     public function __invoke(
         AgentRegistryInterface $agents,
@@ -31,6 +34,8 @@ final class ChatCommand extends Command
         CacheStorageProviderInterface $cache,
         ToolRegistryInterface $tools,
     ): int {
+        // Clear the console screen
+        $this->output->write("\033\143");
         $cache = $cache->storage('chat-messages');
         $console->run(command: 'agent:list', output: $this->output);
         $this->io = new SymfonyStyle($this->input, $this->output);
@@ -48,6 +53,11 @@ final class ChatCommand extends Command
             );
 
             if ($agentName && $agents->has($agentName)) {
+                $cursor = new Cursor($this->output);
+                $cursor->moveUp(\count($availableAgents) + 4);
+                // clears all the output from the current line
+                $cursor->clearOutput();
+
                 $agent = $agents->get($agentName);
                 $this->io->title($agent->getName());
 
@@ -110,6 +120,9 @@ final class ChatCommand extends Command
     {
         return function () use ($agent): string|null {
             $initialPrompts = ['custom'];
+            $cursorOffset = $this->lastMessageCustom ? 7 : 4;
+
+            $this->lastMessageCustom = false;
 
             foreach ($agent->getPrompts() as $prompt) {
                 $initialPrompts[] = $prompt->content;
@@ -118,11 +131,25 @@ final class ChatCommand extends Command
             $initialPrompts[] = 'reset';
             $initialPrompts[] = 'exit';
 
+            $cursor = new Cursor($this->output);
+            if (!$this->firstMessage) {
+                $cursor->moveUp(\count($initialPrompts) + $cursorOffset);
+                // clears all the output from the current line
+                $cursor->clearOutput();
+                $cursor->moveUp();
+            }
+
+
+            if ($this->firstMessage) {
+                $this->firstMessage = false;
+            }
+
             $initialPrompt = $this->choiceQuestion('Choose a prompt:', $initialPrompts, 'custom');
             if ($initialPrompt === 'custom') {
                 // Re-enable input echoing in case it was disabled
                 \shell_exec('stty sane');
                 $initialPrompt = $this->ask('You');
+                $this->lastMessageCustom = true;
             }
 
             return $initialPrompt;

@@ -15,7 +15,7 @@ final class GetDeviceDetailsTool extends PhpTool
     public const NAME = 'get_device_details';
 
     public function __construct(
-        private SmartHomeSystem $smartHome,
+        private readonly SmartHomeSystem $smartHome,
     ) {
         parent::__construct(
             name: self::NAME,
@@ -38,6 +38,7 @@ final class GetDeviceDetailsTool extends PhpTool
             'room' => $device->room,
             'type' => get_class($device),
             'params' => $device->getDetails(),
+            'controlSchema' => $device->getControlSchema(),
         ]);
     }
 }
