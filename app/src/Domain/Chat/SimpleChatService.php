@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Chat;
 
+use App\Agents\DynamicMemoryTool\DynamicMemoryService;
 use App\Application\Entity\Uuid;
 use LLM\Agents\Agent\AgentRepositoryInterface;
 use LLM\Agents\Agent\Exception\AgentNotFoundException;
@@ -18,6 +19,7 @@ use LLM\Agents\LLM\Prompt\Chat\ToolCallResultMessage;
 use LLM\Agents\LLM\Response\ChatResponse;
 use LLM\Agents\LLM\Response\ToolCall;
 use LLM\Agents\LLM\Response\ToolCalledResponse;
+use LLM\Agents\Solution\SolutionMetadata;
 use LLM\Agents\Tool\ToolExecutor;
 use Psr\EventDispatcher\EventDispatcherInterface;
 use Ramsey\Uuid\UuidInterface;
@@ -30,6 +32,7 @@ final readonly class SimpleChatService implements ChatServiceInterface
         private EntityManagerInterface $em,
         private AgentRepositoryInterface $agents,
         private ToolExecutor $toolExecutor,
+        private DynamicMemoryService $memoryService,
         private ?EventDispatcherInterface $eventDispatcher = null,
     ) {}
 
@@ -168,11 +171,22 @@ final readonly class SimpleChatService implements ChatServiceInterface
                 'session_uuid' => (string) $session->uuid,
             ]);
 
-        if ($prompt !== null) {
-            $agent = $agent->withPrompt($prompt);
+        if ($prompt === null) {
+            return $agent;
         }
 
-        return $agent;
+        $memories = $this->memoryService->getCurrentMemory($session->uuid);
+
+
+        return $agent->withPrompt($prompt->withValues([
+            'dynamic_memory' => \implode(
+                "\n",
+                \array_map(
+                    fn(SolutionMetadata $memory) => $memory->content,
+                    $memories->memories,
+                ),
+            ),
+        ]));
     }
 
     private function callTool(Session $session, ToolCall $tool): ToolCallResultMessage
