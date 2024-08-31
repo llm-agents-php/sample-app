@@ -5,11 +5,14 @@ declare(strict_types=1);
 namespace App\Domain\Chat;
 
 use App\Application\Entity\Uuid;
-use App\Domain\Agent\AgentExecutorBuilder;
-use App\Domain\Chat\Exception\ChatNotFoundException;
 use LLM\Agents\Agent\AgentRepositoryInterface;
 use LLM\Agents\Agent\Exception\AgentNotFoundException;
 use LLM\Agents\Agent\Execution;
+use LLM\Agents\Chat\AgentExecutorBuilder;
+use LLM\Agents\Chat\ChatServiceInterface;
+use LLM\Agents\Chat\Exception\ChatNotFoundException;
+use LLM\Agents\Chat\SessionInterface;
+use LLM\Agents\Chat\StreamChunkCallback;
 use LLM\Agents\LLM\Prompt\Chat\Prompt;
 use LLM\Agents\LLM\Prompt\Chat\ToolCallResultMessage;
 use LLM\Agents\LLM\Response\ChatResponse;
@@ -17,6 +20,7 @@ use LLM\Agents\LLM\Response\ToolCall;
 use LLM\Agents\LLM\Response\ToolCalledResponse;
 use LLM\Agents\Tool\ToolExecutor;
 use Psr\EventDispatcher\EventDispatcherInterface;
+use Ramsey\Uuid\UuidInterface;
 
 final readonly class SimpleChatService implements ChatServiceInterface
 {
@@ -29,7 +33,7 @@ final readonly class SimpleChatService implements ChatServiceInterface
         private ?EventDispatcherInterface $eventDispatcher = null,
     ) {}
 
-    public function getSession(Uuid $sessionUuid): Session
+    public function getSession(UuidInterface $sessionUuid): SessionInterface
     {
         $session = $this->sessions->forUpdate()->getByUuid($sessionUuid);
 
@@ -40,7 +44,7 @@ final readonly class SimpleChatService implements ChatServiceInterface
         return $session;
     }
 
-    public function startSession(Uuid $accountUuid, string $agentName): Uuid
+    public function startSession(UuidInterface $accountUuid, string $agentName): UuidInterface
     {
         if (!$this->agents->has($agentName)) {
             throw new AgentNotFoundException($agentName);
@@ -50,7 +54,7 @@ final readonly class SimpleChatService implements ChatServiceInterface
 
         $session = new Session(
             uuid: Uuid::generate(),
-            accountUuid: $accountUuid,
+            accountUuid: new Uuid($accountUuid),
             agentName: $agentName,
         );
 
@@ -59,10 +63,10 @@ final readonly class SimpleChatService implements ChatServiceInterface
 
         $this->updateSession($session);
 
-        return $session->uuid;
+        return $session->uuid->uuid;
     }
 
-    public function ask(Uuid $sessionUuid, string|\Stringable $message): Uuid
+    public function ask(UuidInterface $sessionUuid, string|\Stringable $message): UuidInterface
     {
         $session = $this->getSession($sessionUuid);
 
@@ -74,9 +78,9 @@ final readonly class SimpleChatService implements ChatServiceInterface
         $messageUuid = Uuid::generate();
 
         $this->eventDispatcher->dispatch(
-            new Event\Question(
-                sessionUuid: $session->uuid,
-                messageUuid: $messageUuid,
+            new \LLM\Agents\Chat\Event\Question(
+                sessionUuid: $session->uuid->uuid,
+                messageUuid: $messageUuid->uuid,
                 createdAt: new \DateTimeImmutable(),
                 message: $message,
             ),
@@ -89,10 +93,10 @@ final readonly class SimpleChatService implements ChatServiceInterface
 
         $this->handleResult($execution, $session);
 
-        return $messageUuid;
+        return $messageUuid->uuid;
     }
 
-    public function closeSession(Uuid $sessionUuid): void
+    public function closeSession(UuidInterface $sessionUuid): void
     {
         $session = $this->getSession($sessionUuid);
         $session->finishedAt = new \DateTimeImmutable();
@@ -100,7 +104,7 @@ final readonly class SimpleChatService implements ChatServiceInterface
         $this->updateSession($session);
     }
 
-    public function updateSession(Session $session): void
+    public function updateSession(SessionInterface $session): void
     {
         $this->em->persist($session)->flush();
     }
@@ -132,8 +136,8 @@ final readonly class SimpleChatService implements ChatServiceInterface
                 $finished = true;
 
                 $this->eventDispatcher->dispatch(
-                    new Event\Message(
-                        sessionUuid: $session->uuid,
+                    new \LLM\Agents\Chat\Event\Message(
+                        sessionUuid: $session->uuid->uuid,
                         createdAt: new \DateTimeImmutable(),
                         message: $result->content,
                     ),
@@ -155,7 +159,7 @@ final readonly class SimpleChatService implements ChatServiceInterface
             ->withAgentKey($session->agentName)
             ->withStreamChunkCallback(
                 new StreamChunkCallback(
-                    sessionUuid: $session->uuid,
+                    sessionUuid: $session->uuid->uuid,
                     eventDispatcher: $this->eventDispatcher,
                 ),
             )
@@ -174,8 +178,8 @@ final readonly class SimpleChatService implements ChatServiceInterface
     private function callTool(Session $session, ToolCall $tool): ToolCallResultMessage
     {
         $this->eventDispatcher->dispatch(
-            new Event\ToolCall(
-                sessionUuid: $session->uuid,
+            new \LLM\Agents\Chat\Event\ToolCall(
+                sessionUuid: $session->uuid->uuid,
                 id: $tool->id,
                 tool: $tool->name,
                 arguments: $tool->arguments,
@@ -186,8 +190,8 @@ final readonly class SimpleChatService implements ChatServiceInterface
         $functionResult = $this->toolExecutor->execute($tool->name, $tool->arguments);
 
         $this->eventDispatcher->dispatch(
-            new Event\ToolCallResult(
-                sessionUuid: $session->uuid,
+            new \LLM\Agents\Chat\Event\ToolCallResult(
+                sessionUuid: $session->uuid->uuid,
                 id: $tool->id,
                 tool: $tool->name,
                 result: $functionResult,

@@ -40,6 +40,7 @@ class Kernel extends \Spiral\Framework\Kernel
             Bootloader\AppBootloader::class,
             Bootloader\EventsBootloader::class,
             Bootloader\AgentsBootloader::class,
+            Bootloader\AgentsChatBootloader::class,
             Bootloader\PersistenceBootloader::class,
             Bootloader\SmartHomeBootloader::class,
 

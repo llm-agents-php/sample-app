@@ -10,6 +10,8 @@ use App\Infrastructure\CycleOrm\Table\SessionTable;
 use Cycle\Annotated\Annotation\Column;
 use Cycle\Annotated\Annotation\Entity;
 use Cycle\ORM\Entity\Behavior;
+use LLM\Agents\Chat\SessionInterface;
+use Ramsey\Uuid\UuidInterface;
 
 #[Entity(
     role: Session::ROLE,
@@ -18,7 +20,7 @@ use Cycle\ORM\Entity\Behavior;
 )]
 #[Behavior\CreatedAt(field: 'createdAt', column: SessionTable::CREATED_AT)]
 #[Behavior\UpdatedAt(field: 'updatedAt', column: SessionTable::UPDATED_AT)]
-class Session
+class Session implements SessionInterface
 {
     public const ROLE = 'chat_session';
 
@@ -66,5 +68,15 @@ class Session
     public function isFinished(): bool
     {
         return $this->finishedAt !== null;
+    }
+
+    public function getUuid(): UuidInterface
+    {
+        return $this->uuid->uuid;
+    }
+
+    public function getAgentName(): string
+    {
+        return $this->agentName;
     }
 }
