@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace App\Infrastructure\RoadRunner\Chat;
 
-use App\Application\Entity\Uuid;
-use App\Domain\Chat\ChatHistoryRepositoryInterface;
+use LLM\Agents\Chat\ChatHistoryRepositoryInterface;
 use Psr\SimpleCache\CacheInterface;
+use Ramsey\Uuid\UuidInterface;
 
 final readonly class ChatHistoryRepository implements ChatHistoryRepositoryInterface
 {
@@ -14,7 +14,7 @@ final readonly class ChatHistoryRepository implements ChatHistoryRepositoryInter
         private CacheInterface $cache,
     ) {}
 
-    public function getMessages(Uuid $sessionUuid): iterable
+    public function getMessages(UuidInterface $sessionUuid): iterable
     {
         $messages = (array) $this->cache->get((string) $sessionUuid);
 
@@ -23,11 +23,16 @@ final readonly class ChatHistoryRepository implements ChatHistoryRepositoryInter
         }
     }
 
-    public function addMessage(Uuid $sessionUuid, object $message): void
+    public function addMessage(UuidInterface $sessionUuid, object $message): void
     {
         $messages = (array) $this->cache->get((string) $sessionUuid);
         $messages[] = $message;
 
         $this->cache->set((string) $sessionUuid, $messages);
+    }
+
+    public function clear(UuidInterface $sessionUuid): void
+    {
+        $this->cache->delete((string) $sessionUuid);
     }
 }

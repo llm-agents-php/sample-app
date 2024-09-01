@@ -19,7 +19,7 @@ final readonly class Uuid implements \Stringable, \JsonSerializable
     }
 
     public function __construct(
-        private UuidInterface $uuid,
+        public UuidInterface $uuid,
     ) {}
 
     /** Create from data storage raw value */

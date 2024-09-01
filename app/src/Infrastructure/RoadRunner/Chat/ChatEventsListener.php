@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace App\Infrastructure\RoadRunner\Chat;
 
-use App\Domain\Chat\ChatHistoryRepositoryInterface;
-use App\Domain\Chat\Event\Message;
-use App\Domain\Chat\Event\Question;
-use App\Domain\Chat\Event\ToolCall;
-use App\Domain\Chat\Event\ToolCallResult;
+use LLM\Agents\Chat\ChatHistoryRepositoryInterface;
+use LLM\Agents\Chat\Event\Message;
+use LLM\Agents\Chat\Event\Question;
+use LLM\Agents\Chat\Event\ToolCall;
+use LLM\Agents\Chat\Event\ToolCallResult;
 use Spiral\Events\Attribute\Listener;
 
 final readonly class ChatEventsListener

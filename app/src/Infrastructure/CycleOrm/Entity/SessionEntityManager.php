@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Infrastructure\CycleOrm\Entity;
 
 use App\Domain\Chat\EntityManagerInterface;
-use App\Domain\Chat\Session;
+use LLM\Agents\Chat\SessionInterface;
 
 final readonly class SessionEntityManager implements EntityManagerInterface
 {
@@ -13,7 +13,7 @@ final readonly class SessionEntityManager implements EntityManagerInterface
         private \Cycle\ORM\EntityManagerInterface $em,
     ) {}
 
-    public function persist(Session ...$entities): self
+    public function persist(SessionInterface ...$entities): self
     {
         foreach ($entities as $entity) {
             $this->em->persist($entity);
@@ -22,7 +22,7 @@ final readonly class SessionEntityManager implements EntityManagerInterface
         return $this;
     }
 
-    public function delete(Session ...$entities): self
+    public function delete(SessionInterface ...$entities): self
     {
         foreach ($entities as $entity) {
             $this->em->delete($entity);
