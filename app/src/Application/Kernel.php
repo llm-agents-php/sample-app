@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace App\Application;
 
-use LLM\Agents\Agent\SiteStatusChecker\Bootloader\SiteStatusCheckerBootloader;
-use LLM\Agents\JsonSchema\Mapper\Bootloader\SchemaMapperBootloader;
-use LLM\Agents\OpenAI\Client\Bootloader\OpenAIClientBootloader;
+use LLM\Agents\Agent\SiteStatusChecker\Integrations\Spiral\SiteStatusCheckerBootloader;
+use LLM\Agents\JsonSchema\Mapper\Integration\Spiral\SchemaMapperBootloader;
+use LLM\Agents\OpenAI\Client\Integration\Spiral\OpenAIClientBootloader;
 use Spiral\Boot\Bootloader\CoreBootloader;
 use Spiral\DotEnv\Bootloader\DotenvBootloader;
 use Spiral\Prototype\Bootloader\PrototypeBootloader;
