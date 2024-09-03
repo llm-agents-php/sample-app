@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Endpoint\Console;
 
-use App\Agents\SmartHomeControl\SmartHome\SmartHomeSystem;
+use App\Infrastructure\RoadRunner\SmartHome\DeviceStateManager;
+use LLM\Agents\Agent\SmartHomeControl\SmartHome\DeviceStateRepositoryInterface;
+use LLM\Agents\Agent\SmartHomeControl\SmartHome\SmartHomeSystem;
 use Spiral\Console\Attribute\AsCommand;
 use Spiral\Console\Attribute\Option;
 use Spiral\Console\Command;
@@ -19,17 +21,20 @@ final class DisplaySmartHomeStatusCommand extends Command
     #[Option(name: 'interactive', description: 'Enable interactive mode')]
     public bool $interactive = false;
 
-    public function __invoke(SmartHomeSystem $smartHome): int
-    {
+    public function __invoke(
+        SmartHomeSystem $smartHome,
+        DeviceStateRepositoryInterface $stateRepository,
+    ): int {
+        \assert($stateRepository instanceof DeviceStateManager);
         $lastUpdate = false;
 
         while (true) {
-            if ($smartHome->getLastActionTime() === $lastUpdate) {
+            if ($stateRepository->getLastActionTime() === $lastUpdate) {
                 \sleep(1);
                 continue;
             }
 
-            $lastUpdate = $smartHome->getLastActionTime();
+            $lastUpdate = $stateRepository->getLastActionTime();
 
             // Clear the console screen
             $this->output->write("\033\143");
@@ -51,7 +56,6 @@ final class DisplaySmartHomeStatusCommand extends Command
                 $table->render();
                 $this->output->writeln('');
             }
-
         }
 
         return self::SUCCESS;

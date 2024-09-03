@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Application;
 
 use LLM\Agents\Agent\SiteStatusChecker\Integrations\Spiral\SiteStatusCheckerBootloader;
+use LLM\Agents\Agent\SmartHomeControl\Integrations\Spiral\SmartHomeControlBootloader;
 use LLM\Agents\JsonSchema\Mapper\Integration\Spiral\SchemaMapperBootloader;
 use LLM\Agents\OpenAI\Client\Integration\Spiral\OpenAIClientBootloader;
 use Spiral\Boot\Bootloader\CoreBootloader;
@@ -48,6 +49,7 @@ class Kernel extends \Spiral\Framework\Kernel
             OpenAIClientBootloader::class,
             SchemaMapperBootloader::class,
             SiteStatusCheckerBootloader::class,
+            SmartHomeControlBootloader::class,
         ];
     }
 }

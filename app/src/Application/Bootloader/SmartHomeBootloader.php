@@ -4,23 +4,43 @@ declare(strict_types=1);
 
 namespace App\Application\Bootloader;
 
-use App\Agents\SmartHomeControl\SmartHome\Devices\Light;
-use App\Agents\SmartHomeControl\SmartHome\Devices\SmartAppliance;
-use App\Agents\SmartHomeControl\SmartHome\Devices\Thermostat;
-use App\Agents\SmartHomeControl\SmartHome\Devices\TV;
-use App\Agents\SmartHomeControl\SmartHome\SmartHomeSystem;
-use Psr\SimpleCache\CacheInterface;
+use App\Agents\DynamicMemoryTool\DynamicMemoryTool;
+use App\Infrastructure\RoadRunner\SmartHome\DeviceStateManager;
+use LLM\Agents\Agent\AgentRepositoryInterface;
+use LLM\Agents\Agent\SmartHomeControl\SmartHome\Devices\Light;
+use LLM\Agents\Agent\SmartHomeControl\SmartHome\Devices\SmartAppliance;
+use LLM\Agents\Agent\SmartHomeControl\SmartHome\Devices\Thermostat;
+use LLM\Agents\Agent\SmartHomeControl\SmartHome\Devices\TV;
+use LLM\Agents\Agent\SmartHomeControl\SmartHome\DeviceStateRepositoryInterface;
+use LLM\Agents\Agent\SmartHomeControl\SmartHome\DeviceStateStorageInterface;
+use LLM\Agents\Agent\SmartHomeControl\SmartHome\SmartHomeSystem;
+use LLM\Agents\Agent\SmartHomeControl\SmartHomeControlAgent;
+use LLM\Agents\Solution\ToolLink;
 use Spiral\Boot\Bootloader\Bootloader;
+use Spiral\Cache\CacheStorageProviderInterface;
 
 final class SmartHomeBootloader extends Bootloader
 {
     public function defineSingletons(): array
     {
         return [
+            DeviceStateManager::class => static function (
+                CacheStorageProviderInterface $provider,
+            ): DeviceStateManager {
+                return new DeviceStateManager($provider->storage('smart-home'));
+            },
+
+            DeviceStateStorageInterface::class => DeviceStateManager::class,
+            DeviceStateRepositoryInterface::class => DeviceStateManager::class,
+
             SmartHomeSystem::class => static function (
-                CacheInterface $cache,
+                DeviceStateStorageInterface $stateStorage,
+                DeviceStateRepositoryInterface $stateRepository,
             ): SmartHomeSystem {
-                $smartHome = new SmartHomeSystem($cache);
+                $smartHome = new SmartHomeSystem(
+                    stateStorage: $stateStorage,
+                    stateRepository: $stateRepository,
+                );
 
                 // Living Room Devices
                 $livingRoomAirConditioner = new SmartAppliance(
@@ -119,5 +139,14 @@ final class SmartHomeBootloader extends Bootloader
                 return $smartHome;
             },
         ];
+    }
+
+    public function boot(
+        AgentRepositoryInterface $agents,
+    ): void {
+        /** @var SmartHomeControlAgent $agent */
+        $agent = $agents->get(SmartHomeControlAgent::NAME);
+
+        $agent->addAssociation(new ToolLink(name: DynamicMemoryTool::NAME));
     }
 }
