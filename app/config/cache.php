@@ -8,6 +8,11 @@ return [
     'aliases' => [
         'chat-messages' => [
             'storage' => 'rr-local',
+            'prefix' => 'chat:',
+        ],
+        'smart-home' => [
+            'storage' => 'rr-local',
+            'prefix' => 'smart-home:',
         ],
     ],
 

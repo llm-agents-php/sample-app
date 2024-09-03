@@ -11,6 +11,7 @@
         "guzzlehttp/guzzle": "^7.0",
         "internal/dload": "^0.2.2",
         "llm-agents/agent-site-status-checker": "^1.0",
+        "llm-agents/agent-smart-home-control": "^1.0",
         "llm-agents/agents": "^1.0",
         "llm-agents/cli-chat": "^1.0",
         "llm-agents/json-schema-mapper": "^1.0",
