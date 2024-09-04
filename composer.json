@@ -13,17 +13,18 @@
         "llm-agents/agent-site-status-checker": "^1.0",
         "llm-agents/agent-smart-home-control": "^1.0",
         "llm-agents/agent-symfony-console": "^1.0",
-        "llm-agents/agents": "^1.0",
-        "llm-agents/cli-chat": "^1.0",
+        "llm-agents/agents": "^1.2",
+        "llm-agents/cli-chat": "^1.2",
         "llm-agents/json-schema-mapper": "^1.0",
         "llm-agents/openai-client": "^1.0",
+        "llm-agents/prompt-generator": "^1.0",
         "nesbot/carbon": "^3.4",
         "nyholm/psr7": "^1.8",
         "openai-php/client": "^0.10.1",
         "spiral-packages/league-event": "^1.0",
         "spiral/cycle-bridge": "^2.9",
-        "spiral/framework": "^3.13",
-        "spiral/roadrunner-bridge": "^3.6"
+        "spiral/framework": "^3.14",
+        "spiral/roadrunner-bridge": "^4.0"
     },
     "require-dev": {
         "buggregator/trap": "^1.7",
