@@ -19,6 +19,7 @@ use LLM\Agents\LLM\Prompt\Chat\ToolCallResultMessage;
 use LLM\Agents\LLM\Response\ChatResponse;
 use LLM\Agents\LLM\Response\ToolCall;
 use LLM\Agents\LLM\Response\ToolCalledResponse;
+use LLM\Agents\PromptGenerator\Context;
 use LLM\Agents\Solution\SolutionMetadata;
 use LLM\Agents\Tool\ToolExecutor;
 use Psr\EventDispatcher\EventDispatcherInterface;
@@ -158,6 +159,12 @@ final readonly class SimpleChatService implements ChatServiceInterface
 
     private function buildAgent(Session $session, ?Prompt $prompt): AgentExecutorBuilder
     {
+        $context = new Context();
+        $context->setAuthContext([
+            'account_uuid' => (string) $session->accountUuid,
+            'session_uuid' => (string) $session->uuid,
+        ]);
+
         $agent = $this->builder
             ->withAgentKey($session->agentName)
             ->withStreamChunkCallback(
@@ -166,10 +173,7 @@ final readonly class SimpleChatService implements ChatServiceInterface
                     eventDispatcher: $this->eventDispatcher,
                 ),
             )
-            ->withSessionContext([
-                'account_uuid' => (string) $session->accountUuid,
-                'session_uuid' => (string) $session->uuid,
-            ]);
+            ->withPromptContext($context);
 
         if ($prompt === null) {
             return $agent;

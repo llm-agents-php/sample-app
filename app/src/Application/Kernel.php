@@ -9,6 +9,7 @@ use LLM\Agents\Agent\SmartHomeControl\Integrations\Spiral\SmartHomeControlBootlo
 use LLM\Agents\Agent\SymfonyConsole\Integrations\Spiral\SymfonyConsoleBootloader;
 use LLM\Agents\JsonSchema\Mapper\Integration\Spiral\SchemaMapperBootloader;
 use LLM\Agents\OpenAI\Client\Integration\Spiral\OpenAIClientBootloader;
+use LLM\Agents\PromptGenerator\Integration\Spiral\PromptGeneratorBootloader;
 use Spiral\Boot\Bootloader\CoreBootloader;
 use Spiral\DotEnv\Bootloader\DotenvBootloader;
 use Spiral\Prototype\Bootloader\PrototypeBootloader;
@@ -38,6 +39,11 @@ class Kernel extends \Spiral\Framework\Kernel
             // Prototyping
             PrototypeBootloader::class,
 
+            // LLM
+            PromptGeneratorBootloader::class,
+            OpenAIClientBootloader::class,
+            SchemaMapperBootloader::class,
+
             // Application
             Bootloader\AppBootloader::class,
             Bootloader\EventsBootloader::class,
@@ -47,8 +53,6 @@ class Kernel extends \Spiral\Framework\Kernel
             Bootloader\SmartHomeBootloader::class,
 
             // Agents
-            OpenAIClientBootloader::class,
-            SchemaMapperBootloader::class,
             SiteStatusCheckerBootloader::class,
             SmartHomeControlBootloader::class,
             SymfonyConsoleBootloader::class,
