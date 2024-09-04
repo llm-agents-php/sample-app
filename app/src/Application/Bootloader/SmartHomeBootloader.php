@@ -145,8 +145,8 @@ final class SmartHomeBootloader extends Bootloader
         AgentRepositoryInterface $agents,
     ): void {
         /** @var SmartHomeControlAgent $agent */
-        $agent = $agents->get(SmartHomeControlAgent::NAME);
-
-        $agent->addAssociation(new ToolLink(name: DynamicMemoryTool::NAME));
+//        $agent = $agents->get(SmartHomeControlAgent::NAME);
+//
+//        $agent->addAssociation(new ToolLink(name: DynamicMemoryTool::NAME));
     }
 }
