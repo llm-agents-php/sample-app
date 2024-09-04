@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\Bootloader;
 
+use App\Domain\Chat\PromptGenerator\SessionContextInjector;
 use App\Domain\Chat\SimpleChatService;
 use App\Infrastructure\RoadRunner\Chat\ChatHistoryRepository;
 use LLM\Agents\Chat\ChatHistoryRepositoryInterface;
@@ -11,7 +12,6 @@ use LLM\Agents\Chat\ChatServiceInterface;
 use LLM\Agents\PromptGenerator\Interceptors\AgentMemoryInjector;
 use LLM\Agents\PromptGenerator\Interceptors\InstructionGenerator;
 use LLM\Agents\PromptGenerator\Interceptors\LinkedAgentsInjector;
-use LLM\Agents\PromptGenerator\Interceptors\SessionContextInjector;
 use LLM\Agents\PromptGenerator\Interceptors\UserPromptInjector;
 use LLM\Agents\PromptGenerator\PromptGeneratorPipeline;
 use Spiral\Boot\Bootloader\Bootloader;

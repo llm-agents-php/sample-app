@@ -9,6 +9,13 @@ use App\Application\ToolsLocator;
 use LLM\Agents\Agent\AgentRegistry;
 use LLM\Agents\Agent\AgentRegistryInterface;
 use LLM\Agents\Agent\AgentRepositoryInterface;
+use LLM\Agents\AgentExecutor\ExecutorInterface;
+use LLM\Agents\AgentExecutor\ExecutorPipeline;
+use LLM\Agents\AgentExecutor\Interceptor\GeneratePromptInterceptor;
+use LLM\Agents\AgentExecutor\Interceptor\InjectModelInterceptor;
+use LLM\Agents\AgentExecutor\Interceptor\InjectOptionsInterceptor;
+use LLM\Agents\AgentExecutor\Interceptor\InjectResponseIntoPromptInterceptor;
+use LLM\Agents\AgentExecutor\Interceptor\InjectToolsInterceptor;
 use LLM\Agents\JsonSchema\Mapper\SchemaMapper;
 use LLM\Agents\LLM\ContextFactoryInterface;
 use LLM\Agents\LLM\OptionsFactoryInterface;
@@ -38,6 +45,25 @@ final class AgentsBootloader extends Bootloader
             ContextFactoryInterface::class => ContextFactory::class,
 
             SchemaMapperInterface::class => SchemaMapper::class,
+
+            ExecutorInterface::class => static function (
+                ExecutorPipeline $pipeline,
+
+                // Interceptors
+                GeneratePromptInterceptor $generatePrompt,
+                InjectModelInterceptor $injectModel,
+                InjectToolsInterceptor $injectTools,
+                InjectOptionsInterceptor $injectOptions,
+                InjectResponseIntoPromptInterceptor $injectResponseIntoPrompt,
+            ) {
+                return $pipeline->withInterceptor(
+                    $generatePrompt,
+                    $injectModel,
+                    $injectTools,
+                    $injectOptions,
+                    $injectResponseIntoPrompt,
+                );
+            },
         ];
     }
 
