@@ -5,9 +5,10 @@ declare(strict_types=1);
 namespace App\Agents\AgentsCaller;
 
 use App\Domain\Tool\PhpTool;
-use LLM\Agents\Agent\AgentExecutor;
+use LLM\Agents\AgentExecutor\ExecutorInterface;
 use LLM\Agents\LLM\Prompt\Chat\ToolCallResultMessage;
 use LLM\Agents\LLM\Response\ToolCalledResponse;
+use LLM\Agents\PromptGenerator\Context;
 use LLM\Agents\Tool\ToolExecutor;
 
 /**
@@ -18,7 +19,7 @@ final class AskAgentTool extends PhpTool
     public const NAME = 'ask_agent';
 
     public function __construct(
-        private readonly AgentExecutor $executor,
+        private readonly ExecutorInterface $executor,
         private readonly ToolExecutor $toolExecutor,
     ) {
         parent::__construct(
@@ -47,7 +48,7 @@ PROMPT
 
         // TODO: make async
         while (true) {
-            $execution = $this->executor->execute($input->name, $prompt);
+            $execution = $this->executor->execute(agent: $input->name, prompt: $prompt, promptContext: new Context());
             $result = $execution->result;
             $prompt = $execution->prompt;
 
