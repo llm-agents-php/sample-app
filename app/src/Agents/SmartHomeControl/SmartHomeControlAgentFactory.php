@@ -6,6 +6,7 @@ namespace App\Agents\SmartHomeControl;
 
 use LLM\Agents\Agent\AgentFactoryInterface;
 use LLM\Agents\Agent\AgentInterface;
+use LLM\Agents\Agent\SmartHomeControl\SmartHomeControlAgent;
 
 final class SmartHomeControlAgentFactory implements AgentFactoryInterface
 {
