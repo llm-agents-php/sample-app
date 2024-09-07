@@ -8,6 +8,7 @@ use LLM\Agents\Agent\Agent;
 use LLM\Agents\Agent\AgentAggregate;
 use LLM\Agents\OpenAI\Client\OpenAIModel;
 use LLM\Agents\OpenAI\Client\Option;
+use LLM\Agents\Solution\ContextSourceLink;
 use LLM\Agents\Solution\MetadataType;
 use LLM\Agents\Solution\Model;
 use LLM\Agents\Solution\SolutionMetadata;
@@ -21,7 +22,11 @@ final class CodeReviewAgent extends AgentAggregate
             key: 'code_review',
             name: 'Code Reviewer',
             description: 'Agent can list files in project with given id and then open each file and review the code',
-            instruction: 'You are a code review assistant. Use the provided tools to list project files, read their contents, and submit a code review for each file.',
+            instruction: <<<'INSTRUCTION'
+You are a code review assistant in Spiral Framework.
+Use the provided tools to list project files, read their contents, and submit a code review for each file.
+INSTRUCTION
+            ,
         );
 
         $aggregate = new self($agent);
@@ -55,6 +60,8 @@ final class CodeReviewAgent extends AgentAggregate
         $aggregate->addAssociation(new ToolLink(name: ListProjectTool::NAME));
         $aggregate->addAssociation(new ToolLink(name: ReadFileTool::NAME));
         $aggregate->addAssociation(new ToolLink(name: ReviewTool::NAME));
+
+        $aggregate->addAssociation(new ContextSourceLink(name: 'spiral-docs'));
 
         return $aggregate;
     }

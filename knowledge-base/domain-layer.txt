@@ -1,25 +1,38 @@
 This is an abstraction layer for the LLM Agents. It can be used as a template for creating new agents.
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Agent
+//vendor/llm-agents/agents/src/Agent
 namespace LLM\Agents\Agent;
 use LLM\Agents\Agent\Exception\AgentAlreadyRegisteredException;
+/**
+ * It defines the contract for a registry that manages the registration of agents.
+ *
+ * Purpose:
+ * - Provide a centralized mechanism for registering new agents in the system.
+ * - Allow for dynamic addition of agents at runtime.
+ */
 interface AgentRegistryInterface
 {
     /**
+     * Register a new agent in the system.
+     *
      * @throws AgentAlreadyRegisteredException
      */
     public function register(AgentInterface $agent): void;
     /**
+     * Retrieve all registered agents.
+     *
      * @return AgentInterface[]
      */
     public function all(): iterable;
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Agent
+//vendor/llm-agents/agents/src/Agent
 namespace LLM\Agents\Agent;
 use LLM\Agents\Agent\Exception\AgentAlreadyRegisteredException;
 use LLM\Agents\Agent\Exception\AgentNotFoundException;
 final class AgentRegistry implements AgentRegistryInterface, AgentRepositoryInterface
 {
-    /** @var array<string, AgentInterface> */
+    /**
+     * @var array<string, AgentInterface>
+     */
     private array $agents = [];
     public function register(AgentInterface $agent): void
     {
@@ -31,7 +44,7 @@ final class AgentRegistry implements AgentRegistryInterface, AgentRepositoryInte
     }
     public function get(string $key): AgentInterface
     {
-        if (!$this->has($key)) {
+        if (! $this->has($key)) {
             throw new AgentNotFoundException(\sprintf('Agent with key \'%s\' is not registered.', $key));
         }
         return $this->agents[$key];
@@ -45,21 +58,27 @@ final class AgentRegistry implements AgentRegistryInterface, AgentRepositoryInte
         return $this->agents;
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Agent
+//vendor/llm-agents/agents/src/Agent
 namespace LLM\Agents\Agent;
 use LLM\Agents\LLM\AgentPromptGeneratorInterface;
 use LLM\Agents\LLM\ContextFactoryInterface;
 use LLM\Agents\LLM\ContextInterface;
 use LLM\Agents\LLM\LLMInterface;
 use LLM\Agents\LLM\OptionsFactoryInterface;
+use LLM\Agents\LLM\OptionsInterface;
 use LLM\Agents\LLM\Prompt\Chat\Prompt;
+use LLM\Agents\LLM\Prompt\Context;
 use LLM\Agents\LLM\Prompt\Tool;
+use LLM\Agents\LLM\PromptContextInterface;
 use LLM\Agents\LLM\Response\ChatResponse;
 use LLM\Agents\LLM\Response\ToolCalledResponse;
 use LLM\Agents\Solution\ToolLink;
 use LLM\Agents\Tool\SchemaMapperInterface;
 use LLM\Agents\Tool\ToolInterface;
 use LLM\Agents\Tool\ToolRepositoryInterface;
+/**
+ * @deprecated
+ */
 final readonly class AgentExecutor
 {
     public function __construct(
@@ -75,19 +94,20 @@ final readonly class AgentExecutor
         string $agent,
         string|\Stringable|Prompt $prompt,
         ?ContextInterface $context = null,
-        ?array $sessionContext = null,
+        ?OptionsInterface $options = null,
+        PromptContextInterface $promptContext = new Context(),
     ): Execution {
         $agent = $this->agents->get($agent);
         $context ??= $this->contextFactory->create();
         if (!$prompt instanceof Prompt) {
-            $prompt = $this->promptGenerator->generate($agent, $prompt, $sessionContext);
+            $prompt = $this->promptGenerator->generate($agent, $prompt, $promptContext);
         }
         $model = $agent->getModel();
         $tools = \array_map(
             fn(ToolLink $tool): ToolInterface => $this->tools->get($tool->getName()),
             $agent->getTools(),
         );
-        $options = $this->optionsFactory
+        $defaultOptions = $this->optionsFactory
             ->create()
             ->with('model', $model->name)
             ->with(
@@ -102,6 +122,11 @@ final readonly class AgentExecutor
                     $tools,
                 ),
             );
+        if ($options === null) {
+            $options = $defaultOptions;
+        } else {
+            $options = $defaultOptions->merge($options);
+        }
         foreach ($agent->getConfiguration() as $configuration) {
             $options = $options->with($configuration->key, $configuration->content);
         }
@@ -115,18 +140,25 @@ final readonly class AgentExecutor
         );
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Agent
+//vendor/llm-agents/agents/src/Agent
 namespace LLM\Agents\Agent;
 use LLM\Agents\LLM\Prompt\Chat\PromptInterface;
 use LLM\Agents\LLM\Response\Response;
+/**
+ * Represents the result of an agent's execution, including the response and the prompt used.
+ */
 final readonly class Execution
 {
+    /**
+     * @param Response $result The response from the agent's execution.
+     * @param PromptInterface $prompt The prompt used for the execution.
+     */
     public function __construct(
         public Response $result,
         public PromptInterface $prompt,
     ) {}
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Agent
+//vendor/llm-agents/agents/src/Agent
 namespace LLM\Agents\Agent;
 use LLM\Agents\Solution\AgentLink;
 use LLM\Agents\Solution\Model;
@@ -134,47 +166,105 @@ use LLM\Agents\Solution\Solution;
 use LLM\Agents\Solution\SolutionMetadata;
 use LLM\Agents\Solution\ToolLink;
 /**
+ * Represents an AI agent capable of performing tasks, making decisions,
+ * and interacting with various tools and other agents.
  * @psalm-type TAssociation = Solution|Model|ToolLink|AgentLink
  */
 interface AgentInterface
 {
+    /**
+     * Get the unique key identifier for the agent.
+     */
     public function getKey(): string;
+    /**
+     * Get the human-readable name of the agent.
+     */
     public function getName(): string;
+    /**
+     * Get the description of the agent's purpose and capabilities.
+     */
     public function getDescription(): ?string;
+    /**
+     * Get the primary instruction set for the agent.
+     */
     public function getInstruction(): string;
     /**
-     * @return array<ToolLink>
+     * Get the language model associated with this agent.
      */
-    public function getTools(): array;
-    /**
-     * @return array<AgentLink>
-     */
-    public function getAgents(): array;
     public function getModel(): Model;
     /**
+     * Get the agent's memory, containing learned information and experiences.
+     *
      * @return array<SolutionMetadata>
      */
     public function getMemory(): array;
     /**
+     * Get the list of predefined prompts for the agent.
+     *
      * @return array<SolutionMetadata>
      */
     public function getPrompts(): array;
     /**
+     * Get the agent's configuration settings.
+     *
+     * This method returns an array of configuration settings for the agent,
+     * which can include parameters for the LLM (Language Model) client configuration.
+     * These settings may affect how the agent interacts with the language model,
+     * including parameters like temperature, max tokens, and other model-specific options.
+     *
      * @return array<SolutionMetadata>
+     *
+     * @example
+     * [
+     *     new SolutionMetadata(MetadataType::Configuration, 'temperature', 0.7),
+     *     new SolutionMetadata(MetadataType::Configuration, 'max_tokens', 150),
+     *     new SolutionMetadata(MetadataType::Configuration, 'top_p', 1),
+     * ]
      */
     public function getConfiguration(): array;
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Agent
+//vendor/llm-agents/agents/src/Agent
 namespace LLM\Agents\Agent;
+use LLM\Agents\Solution\AgentLink;
+interface HasLinkedAgentsInterface
+{
+    /**
+     * Get the list of other agents this agent can interact with.
+     *
+     * @return array<AgentLink>
+     */
+    public function getAgents(): array;
+}
+//vendor/llm-agents/agents/src/Agent
+namespace LLM\Agents\Agent;
+namespace LLM\Agents\Agent;
+/**
+ * It defines a contract for creating instances of agents. It encapsulates the complex process of agent
+ * initialization, configuration, and setup.
+ *
+ * Purpose:
+ * 1. Abstraction: It provides a level of abstraction between the agent creation
+ *    process and the rest of the application, allowing for different implementation
+ *    strategies without affecting the client code.
+ *
+ * 2. Flexibility: By using a factory interface, the framework can support multiple
+ *    types of agents or different initialization strategies for agents without
+ *    changing the core logic.
+ */
 interface AgentFactoryInterface
 {
+    /**
+     * Create and return a fully initialized agent instance.
+     */
     public function create(): AgentInterface;
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Agent
+//vendor/llm-agents/agents/src/Agent
 namespace LLM\Agents\Agent;
 use LLM\Agents\Agent\Exception\AgentModelException;
 use LLM\Agents\Agent\Exception\MissingModelException;
+use LLM\Agents\Embeddings\HasLinkedContextSourcesInterface;
 use LLM\Agents\Solution\AgentLink;
+use LLM\Agents\Solution\ContextSourceLink;
 use LLM\Agents\Solution\MetadataType;
 use LLM\Agents\Solution\Model;
 use LLM\Agents\Solution\Solution;
@@ -184,9 +274,14 @@ use LLM\Agents\Solution\ToolLink;
 /**
  * @psalm-type TAssociation = Solution|Model|ToolLink|AgentLink
  */
-class AgentAggregate implements AgentInterface
+class AgentAggregate implements AgentInterface,
+                                HasLinkedAgentsInterface,
+                                HasLinkedToolsInterface,
+                                HasLinkedContextSourcesInterface
 {
-    /** @var array<TAssociation> */
+    /**
+     * @var array<TAssociation>
+     */
     private array $associations = [];
     public function __construct(
         private readonly Agent $agent,
@@ -212,6 +307,13 @@ class AgentAggregate implements AgentInterface
         return \array_filter(
             $this->associations,
             static fn(Solution $association): bool => $association instanceof ToolLink,
+        );
+    }
+    public function getContextSources(): array
+    {
+        return \array_filter(
+            $this->associations,
+            static fn(Solution $association): bool => $association instanceof ContextSourceLink,
         );
     }
     public function getAgents(): array
@@ -282,62 +384,77 @@ class AgentAggregate implements AgentInterface
         }
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Agent/Exception
+//vendor/llm-agents/agents/src/Agent/Exception
 namespace LLM\Agents\Agent\Exception;
-final class InvalidBuilderStateException extends AgentException
-{
-}
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Agent/Exception
+final class InvalidBuilderStateException extends AgentException {}
+//vendor/llm-agents/agents/src/Agent/Exception
 namespace LLM\Agents\Agent\Exception;
-class AgentException extends \DomainException
-{
-}
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Agent/Exception
+class AgentException extends \DomainException {}
+//vendor/llm-agents/agents/src/Agent/Exception
 namespace LLM\Agents\Agent\Exception;
-final class AgentModelException extends AgentException
-{
-}
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Agent/Exception
+final class AgentModelException extends AgentException {}
+//vendor/llm-agents/agents/src/Agent/Exception
 namespace LLM\Agents\Agent\Exception;
-final class AgentAlreadyRegisteredException extends AgentException
-{
-}
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Agent/Exception
+final class AgentAlreadyRegisteredException extends AgentException {}
+//vendor/llm-agents/agents/src/Agent/Exception
 namespace LLM\Agents\Agent\Exception;
-final class AgentNotFoundException extends AgentException
-{
-}
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Agent/Exception
+final class AgentNotFoundException extends AgentException {}
+//vendor/llm-agents/agents/src/Agent/Exception
 namespace LLM\Agents\Agent\Exception;
-final class InvalidDependencyException extends AgentException
-{
-}
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Agent/Exception
+final class InvalidDependencyException extends AgentException {}
+//vendor/llm-agents/agents/src/Agent/Exception
 namespace LLM\Agents\Agent\Exception;
 final class MissingModelException extends AgentException
 {
     public function __construct()
     {
-        parent::__construct("Agent must have an associated model");
+        parent::__construct('Agent must have an associated model');
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Agent
+//vendor/llm-agents/agents/src/Agent
 namespace LLM\Agents\Agent;
 use LLM\Agents\Agent\Exception\AgentNotFoundException;
+/**
+ * It defines the contract for a repository that provides access to registered agents.
+ *
+ * Purpose:
+ * - Provide a standardized way to retrieve specific agents by their unique keys.
+ * - Allow checking for the existence of agents in the system.
+ *
+ * This interface is essential for components that need to work with specific
+ * agents. It abstracts the storage and retrieval mechanisms, allowing for
+ * different implementations (e.g., in-memory, database-backed) without
+ * affecting the consumers of the interface.
+ */
 interface AgentRepositoryInterface
 {
     /**
+     * Retrieve an agent by its unique key.
+     *
+     * @param non-empty-string $key The unique key of the agent to retrieve.
      * @throws AgentNotFoundException
      */
     public function get(string $key): AgentInterface;
+    /**
+     * Check if an agent with the given key exists in the repository.
+     *
+     * @param non-empty-string $key The key to check for existence.
+     */
     public function has(string $key): bool;
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Agent
+//vendor/llm-agents/agents/src/Agent
 namespace LLM\Agents\Agent;
 use LLM\Agents\Solution\Solution;
 use LLM\Agents\Solution\SolutionType;
 final class Agent extends Solution
 {
+    /**
+     * @param string $key The unique key of the agent that is used to retrieve it
+     * @param string $name The name of the agent
+     * @param string $description The short description
+     * @param string $instruction The initial instruction for the agent to interact with the user
+     * @param bool $isActive
+     */
     public function __construct(
         public readonly string $key,
         string $name,
@@ -352,23 +469,46 @@ final class Agent extends Solution
         );
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Tool
+//vendor/llm-agents/agents/src/Agent
+namespace LLM\Agents\Agent;
+use LLM\Agents\Solution\ToolLink;
+interface HasLinkedToolsInterface
+{
+    /**
+     * Get the list of tools available to the agent.
+     *
+     * @return array<ToolLink>
+     */
+    public function getTools(): array;
+}
+//vendor/llm-agents/agents/src/Tool
 namespace LLM\Agents\Tool;
 use LLM\Agents\Tool\Exception\ToolNotFoundException;
+/**
+ * This interface defines the contract for retrieving specific tools from the repository.
+ */
 interface ToolRepositoryInterface
 {
     /**
-     * @throws ToolNotFoundException
+     * Retrieve a tool by its name.
+     *
+     * @param string $name The unique name of the tool to retrieve
+     * @throws ToolNotFoundException If the tool with the given name is not found
      */
     public function get(string $name): ToolInterface;
+    /**
+     * Check if a tool with the given name exists in the repository.
+     */
     public function has(string $name): bool;
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Tool
+//vendor/llm-agents/agents/src/Tool
 namespace LLM\Agents\Tool;
 use LLM\Agents\Tool\Exception\ToolNotFoundException;
 final class ToolRegistry implements ToolRegistryInterface, ToolRepositoryInterface
 {
-    /** @var array<ToolInterface> */
+    /**
+     * @var array<ToolInterface>
+     */
     private array $tools = [];
     public function register(ToolInterface ...$tools): void
     {
@@ -392,66 +532,82 @@ final class ToolRegistry implements ToolRegistryInterface, ToolRepositoryInterfa
         return $this->tools;
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Tool
+//vendor/llm-agents/agents/src/Tool
 namespace LLM\Agents\Tool;
+/**
+ * This interface defines the contract for registering and retrieving tools.
+ */
 interface ToolRegistryInterface
 {
+    /**
+     * Register one or more tools in the registry.
+     */
     public function register(ToolInterface ...$tools): void;
     /**
-     * @return iterable<ToolInterface>
+     * Retrieve all registered tools.
+     *
+     * @return iterable<ToolInterface> An iterable collection of all registered tools
      */
     public function all(): iterable;
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Tool
+//vendor/llm-agents/agents/src/Tool
 namespace LLM\Agents\Tool;
 use LLM\Agents\Tool\Exception\ExecutorNotFoundException;
-use LLM\Agents\Tool\Exception\UnsupportedToolExecutionException;
+use LLM\Agents\Tool\LanguageExecutor\PhpLanguageExecutor;
+/**
+ * Executes tools based on their language and input.
+ *
+ * This class is responsible for executing tools of various programming languages.
+ * It uses a strategy pattern to delegate execution to language-specific executors.
+ */
 final class ToolExecutor
 {
-    /** @var array<ExecutorInterface> */
-    private array $executors = [];
+    /** @var array<LanguageExecutorInterface> */
+    private array $languageExecutors = [];
     public function __construct(
         private readonly ToolRepositoryInterface $tools,
         private readonly SchemaMapperInterface $schemaMapper,
-    ) {}
-    public function register(ToolLanguage $language, ExecutorInterface $executor): void
-    {
-        $this->executors[$language->value] = $executor;
+    ) {
+        $this->registerLanguageExecutor(ToolLanguage::PHP, new PhpLanguageExecutor());
     }
+    /**
+     * Registers a language-specific executor.
+     */
+    public function registerLanguageExecutor(ToolLanguage $language, LanguageExecutorInterface $executor): void
+    {
+        $this->languageExecutors[$language->value] = $executor;
+    }
+    /**
+     * Executes a tool with the given input.
+     *
+     * @param string $tool The unique name of the tool to execute.
+     * @param string $input JSON-encoded input for the tool.
+     * @return string|\Stringable The result of the tool execution.
+     * @throws ExecutorNotFoundException If no executor is found for the tool's language.
+     */
     public function execute(string $tool, string $input): string|\Stringable
     {
         $tool = $this->tools->get($tool);
         $input = $this->schemaMapper->toObject($input, $tool->getInputSchema());
-        if ($tool->getLanguage() === ToolLanguage::PHP) {
-            try {
-                return $tool->execute($input);
-            } catch (\Throwable $e) {
-                return \json_encode([
-                    'error' => $e->getMessage(),
-                ]);
-            }
-        }
-        if (!$this->has($tool->getLanguage())) {
+        if (!isset($this->languageExecutors[$tool->getLanguage()->value])) {
             throw new ExecutorNotFoundException($tool->getLanguage());
         }
-        $executor = $this->executors[$tool->getLanguage()->value];
-        if ($tool instanceof ExecutorAwareInterface) {
-            try {
-                return $tool->setExecutor($executor)->execute($input);
-            } catch (\Throwable $e) {
-                return \json_encode([
-                    'error' => $e->getMessage(),
-                ]);
-            }
+        $executor = $this->languageExecutors[$tool->getLanguage()->value];
+        try {
+            return $executor->execute($tool, $input);
+        } catch (\Throwable $e) {
+            return \json_encode(['error' => $e->getMessage()]);
         }
-        throw new UnsupportedToolExecutionException($tool->getName());
     }
+    /**
+     * Checks if an executor is registered for the given language.
+     */
     public function has(ToolLanguage $language): bool
     {
         return isset($this->executors[$language->value]);
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Tool
+//vendor/llm-agents/agents/src/Tool
 namespace LLM\Agents\Tool;
 use LLM\Agents\Solution\ToolLink;
 abstract class Tool extends ToolLink implements ToolInterface
@@ -476,32 +632,118 @@ abstract class Tool extends ToolLink implements ToolInterface
         return $this->inputSchema;
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Tool
+//vendor/llm-agents/agents/src/Tool
 namespace LLM\Agents\Tool;
-interface ExecutorInterface
+/**
+ * Implemented by tools that require their code to be executed by a language-specific executor.
+ */
+interface LanguageExecutorAwareInterface
 {
-    public function execute(string $code, object $input): string|\Stringable;
+    /**
+     * Get the code to be executed by the language executor.
+     */
+    public function getExecutableCode(): string;
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Tool
+//vendor/llm-agents/agents/src/Tool
+namespace LLM\Agents\Tool;
+/**
+ * Defines the contract for language-specific executors that can run tool code.
+ *
+ * @example
+ * Here's an example implementation for a Python language executor:
+ *
+ * ```php
+ * class PythonLanguageExecutor implements LanguageExecutorInterface
+ * {
+ *     public function execute(ToolInterface $tool, object $input): string|\Stringable
+ *     {
+ *         if (!$tool instanceof LanguageExecutorAwareInterface) {
+ *             throw new \InvalidArgumentException("Tool must implement LanguageExecutorAwareInterface for Python execution.");
+ *         }
+ *
+ *         $code = $tool->getExecutableCode();
+ *
+ *         // Execute the Python script
+ *         $output = ....; // Run the script using the Python interpreter
+ *
+ *         return $output;
+ *     }
+ * }
+ * ```
+ */
+interface LanguageExecutorInterface
+{
+    /**
+     * Execute the given tool with the provided input.
+     *
+     * This method should handle the execution of the tool's code in the specific
+     * language that this executor is designed for. It should properly set up the
+     * execution environment, run the code, and handle any language-specific
+     * intricacies.
+     *
+     * @param ToolInterface $tool The tool to be executed. For non-PHP languages, this should typically implement LanguageExecutorAwareInterface.
+     */
+    public function execute(ToolInterface $tool, object $input): string|\Stringable;
+}
+//vendor/llm-agents/agents/src/Tool
 namespace LLM\Agents\Tool;
 use LLM\Agents\Tool\Exception\LanguageIsNotSupportedException;
+/**
+ * This enum defines the supported programming languages for tools.
+ * It provides a mapping between language names and their corresponding MIME types.
+ */
 enum ToolLanguage: string
 {
     case PHP = 'php';
     case Lua = 'lua';
+    case Python = 'python';
+    case Ruby = 'ruby';
+    case JavaScript = 'javascript';
+    case TypeScript = 'typescript';
+    case Shell = 'shell';
     public static function createFromString(string $language): ToolLanguage
     {
         return match ($language) {
+            // PHP
             'application/x-httpd-php',
             'application/x-php',
             'php' => self::PHP,
+            // Lua
             'application/x-lua',
             'lua' => self::Lua,
+            // Python
+            'application/x-python',
+            'python' => self::Python,
+            // Ruby
+            'application/x-ruby',
+            'ruby' => self::Ruby,
+            // JavaScript
+            'application/javascript',
+            'application/x-javascript',
+            'text/javascript',
+            'text/x-javascript',
+            'text/x-js',
+            'text/ecmascript',
+            'application/ecmascript',
+            'application/x-ecmascript',
+            'javascript' => self::JavaScript,
+            // TypeScript
+            'application/typescript',
+            'application/x-typescript',
+            'text/typescript',
+            'text/x-typescript',
+            'typescript' => self::TypeScript,
+            // Shell
+            'application/x-sh',
+            'application/x-shellscript',
+            'text/x-sh',
+            'text/x-shellscript',
+            'shell' => self::Shell,
             default => throw new LanguageIsNotSupportedException($language),
         };
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Tool/Exception
+//vendor/llm-agents/agents/src/Tool/Exception
 namespace LLM\Agents\Tool\Exception;
 final class LanguageIsNotSupportedException extends ToolException
 {
@@ -510,7 +752,7 @@ final class LanguageIsNotSupportedException extends ToolException
         parent::__construct(\sprintf('Language "%s" is not supported.', $language));
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Tool/Exception
+//vendor/llm-agents/agents/src/Tool/Exception
 namespace LLM\Agents\Tool\Exception;
 final class ToolNotFoundException extends ToolException
 {
@@ -519,17 +761,13 @@ final class ToolNotFoundException extends ToolException
         parent::__construct(\sprintf('Tool not found: %s', $tool));
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Tool/Exception
+//vendor/llm-agents/agents/src/Tool/Exception
 namespace LLM\Agents\Tool\Exception;
-class ToolException extends \DomainException
-{
-}
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Tool/Exception
+class ToolException extends \DomainException {}
+//vendor/llm-agents/agents/src/Tool/Exception
 namespace LLM\Agents\Tool\Exception;
-final class DuplicateToolException extends ToolException
-{
-}
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Tool/Exception
+final class DuplicateToolException extends ToolException {}
+//vendor/llm-agents/agents/src/Tool/Exception
 namespace LLM\Agents\Tool\Exception;
 final class UnsupportedToolExecutionException extends ToolException
 {
@@ -538,55 +776,600 @@ final class UnsupportedToolExecutionException extends ToolException
         parent::__construct(\sprintf('Tool does not support execution: %s', $tool));
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Tool/Exception
+//vendor/llm-agents/agents/src/Tool/Exception
 namespace LLM\Agents\Tool\Exception;
 use LLM\Agents\Tool\ToolLanguage;
 final class ExecutorNotFoundException extends ToolException
 {
     public function __construct(ToolLanguage $language)
     {
-        parent::__construct(sprintf('Executor not found for language: %s', $language->value));
+        parent::__construct(\sprintf('Executor not found for language: %s', $language->value));
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Tool
+//vendor/llm-agents/agents/src/Tool
 namespace LLM\Agents\Tool;
-interface ExecutorAwareInterface
+/**
+ * @template T of object
+ * @extends Tool<T>
+ */
+abstract class PhpTool extends Tool
 {
-    public function setExecutor(ExecutorInterface $executor): ToolInterface;
+    /**
+     * Get the programming language used to implement the tool.
+     */
+    public function getLanguage(): ToolLanguage
+    {
+        return ToolLanguage::PHP;
+    }
+    /**
+     * Execute the tool with the given input.
+     *
+     * @param T $input
+     */
+    abstract public function execute(object $input): string|\Stringable;
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Tool
+//vendor/llm-agents/agents/src/Tool
 namespace LLM\Agents\Tool;
+/**
+ * Provides functionality to convert between JSON schemas and PHP objects.
+ */
 interface SchemaMapperInterface
 {
     /**
-     * @param class-string $class
+     * Convert a PHP class to a JSON schema.
+     *
+     * @param class-string $class The fully qualified class name to convert.
+     * @return array The JSON schema representation of the class.
      */
     public function toJsonSchema(string $class): array;
     /**
+     * Convert a JSON string to a PHP object.
+     *
      * @template T of object
-     * @param class-string<T>|string $class
-     * @return T
+     * @param string $json The JSON string to convert.
+     * @param class-string<T>|string|null $class The target class to map the JSON to. If null, returns a stdClass.
+     *
+     * @return T The resulting PHP object.
      */
     public function toObject(string $json, ?string $class = null): object;
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Tool
+//vendor/llm-agents/agents/src/Tool/LanguageExecutor
+namespace LLM\Agents\Tool\LanguageExecutor;
+use LLM\Agents\Tool\LanguageExecutorInterface;
+use LLM\Agents\Tool\ToolInterface;
+/**
+ * Executes PHP code.
+ */
+final readonly class PhpLanguageExecutor implements LanguageExecutorInterface
+{
+    public function execute(ToolInterface $tool, object $input): string|\Stringable
+    {
+        return $tool->execute($input);
+    }
+}
+//vendor/llm-agents/agents/src/Tool
 namespace LLM\Agents\Tool;
 /**
+ * Represents a tool that can be used by an AI agent to perform specific tasks.
+ *
  * @template T of object
  */
 interface ToolInterface
 {
-    public function getName(): string;
-    public function getDescription(): string;
-    /** @return class-string<T>|string */
-    public function getInputSchema(): string;
-    public function getLanguage(): ToolLanguage;
     /**
-     * @param T $input
+     * Get the unique name of the tool.
      */
-    public function execute(object $input): string|\Stringable;
+    public function getName(): string;
+    /**
+     * Get the human-readable description of the tool's functionality.
+     */
+    public function getDescription(): string;
+    /**
+     * Get the input schema class name for the tool.
+     *
+     * @return class-string<T>|string
+     */
+    public function getInputSchema(): string;
+    /**
+     * Get the programming language used to implement the tool.
+     */
+    public function getLanguage(): ToolLanguage;
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Solution
+//vendor/llm-agents/agents/src/AgentExecutor
+namespace LLM\Agents\AgentExecutor;
+use LLM\Agents\Agent\Execution;
+/**
+ * Interceptors allow for modifying the execution flow, adding pre- or post-processing steps,
+ * or altering the behavior of the executor without changing its core implementation.
+ *
+ * @example
+ *  Here's an example of a logging interceptor:
+ *
+ *  ```php
+ *  final readonly class LoggingInterceptor implements ExecutorInterceptorInterface
+ *  {
+ *      public function __construct(private LoggerInterface $logger) {}
+ *
+ *      public function execute(ExecutionInput $input, InterceptorHandler $next): Execution
+ *      {
+ *          $this->logger->info('Executing agent: ' . $input->agent);
+ *
+ *          $startTime = \microtime(true);
+ *          $execution = $next($input);
+ *          $duration = \microtime(true) - $startTime;
+ *
+ *          $this->logger->info('Execution completed', [
+ *              'agent' => $input->agent,
+ *              'duration' => $duration,
+ *              'resultType' => get_class($execution->result),
+ *          ]);
+ *
+ *          return $execution;
+ *      }
+ *  }
+ *  ```
+ */
+interface ExecutorInterceptorInterface
+{
+    /**
+     * Execute the interceptor logic.
+     *
+     * This method is called as part of the execution pipeline. It can modify the input,
+     * perform additional operations, or alter the execution flow.
+     *
+     * @param ExecutionInput $input The current execution input
+     * @param InterceptorHandler $next The next handler in the pipeline
+     *
+     * @return Execution The result of the execution after this interceptor's processing
+     */
+    public function execute(
+        ExecutionInput $input,
+        InterceptorHandler $next,
+    ): Execution;
+}
+//vendor/llm-agents/agents/src/AgentExecutor
+namespace LLM\Agents\AgentExecutor;
+use LLM\Agents\Agent\Execution;
+final readonly class InterceptorHandler
+{
+    public function __construct(
+        private ExecutorInterface $executor,
+    ) {}
+    public function __invoke(ExecutionInput $input): Execution
+    {
+        return $this->executor->execute(
+            agent: $input->agent,
+            prompt: $input->prompt,
+            context: $input->context,
+            options: $input->options,
+            promptContext: $input->promptContext,
+        );
+    }
+}
+//vendor/llm-agents/agents/src/AgentExecutor/Interceptor
+namespace LLM\Agents\AgentExecutor\Interceptor;
+use LLM\Agents\Agent\AgentRepositoryInterface;
+use LLM\Agents\Agent\Execution;
+use LLM\Agents\AgentExecutor\ExecutionInput;
+use LLM\Agents\AgentExecutor\ExecutorInterceptorInterface;
+use LLM\Agents\AgentExecutor\InterceptorHandler;
+use LLM\Agents\LLM\AgentPromptGeneratorInterface;
+use LLM\Agents\LLM\Prompt\Chat\PromptInterface;
+final readonly class GeneratePromptInterceptor implements ExecutorInterceptorInterface
+{
+    public function __construct(
+        private AgentRepositoryInterface $agents,
+        private AgentPromptGeneratorInterface $promptGenerator,
+    ) {}
+    public function execute(
+        ExecutionInput $input,
+        InterceptorHandler $next,
+    ): Execution {
+        if (!$input->prompt instanceof PromptInterface) {
+            $input = $input->withPrompt(
+                $this->promptGenerator->generate(
+                    $this->agents->get($input->agent),
+                    $input->prompt,
+                    $input->promptContext,
+                ),
+            );
+        }
+        return $next($input);
+    }
+}
+//vendor/llm-agents/agents/src/AgentExecutor/Interceptor
+namespace LLM\Agents\AgentExecutor\Interceptor;
+use LLM\Agents\Agent\Execution;
+use LLM\Agents\AgentExecutor\ExecutionInput;
+use LLM\Agents\AgentExecutor\ExecutorInterceptorInterface;
+use LLM\Agents\AgentExecutor\InterceptorHandler;
+use LLM\Agents\LLM\Response\ChatResponse;
+use LLM\Agents\LLM\Response\ToolCalledResponse;
+final class InjectResponseIntoPromptInterceptor implements ExecutorInterceptorInterface
+{
+    public function execute(
+        ExecutionInput $input,
+        InterceptorHandler $next,
+    ): Execution {
+        $execution = $next($input);
+        $prompt = $execution->prompt;
+        if (
+            $execution->result instanceof ChatResponse
+            || $execution->result instanceof ToolCalledResponse
+        ) {
+            $prompt = $prompt->withAddedMessage($execution->result->toMessage());
+        }
+        return new Execution(
+            result: $execution->result,
+            prompt: $prompt,
+        );
+    }
+}
+//vendor/llm-agents/agents/src/AgentExecutor/Interceptor
+namespace LLM\Agents\AgentExecutor\Interceptor;
+use LLM\Agents\Agent\AgentRepositoryInterface;
+use LLM\Agents\Agent\Execution;
+use LLM\Agents\AgentExecutor\ExecutionInput;
+use LLM\Agents\AgentExecutor\ExecutorInterceptorInterface;
+use LLM\Agents\AgentExecutor\InterceptorHandler;
+final readonly class InjectModelInterceptor implements ExecutorInterceptorInterface
+{
+    public function __construct(
+        private AgentRepositoryInterface $agents,
+    ) {}
+    public function execute(
+        ExecutionInput $input,
+        InterceptorHandler $next,
+    ): Execution {
+        $agent = $this->agents->get($input->agent);
+        $input = $input->withOptions(
+            $input->options->with('model', $agent->getModel()->name),
+        );
+        return $next($input);
+    }
+}
+//vendor/llm-agents/agents/src/AgentExecutor/Interceptor
+namespace LLM\Agents\AgentExecutor\Interceptor;
+use LLM\Agents\Agent\AgentRepositoryInterface;
+use LLM\Agents\Agent\Execution;
+use LLM\Agents\Agent\HasLinkedToolsInterface;
+use LLM\Agents\AgentExecutor\ExecutionInput;
+use LLM\Agents\AgentExecutor\ExecutorInterceptorInterface;
+use LLM\Agents\AgentExecutor\InterceptorHandler;
+use LLM\Agents\LLM\Prompt\Tool;
+use LLM\Agents\Solution\ToolLink;
+use LLM\Agents\Tool\SchemaMapperInterface;
+use LLM\Agents\Tool\ToolInterface;
+use LLM\Agents\Tool\ToolRepositoryInterface;
+final readonly class InjectToolsInterceptor implements ExecutorInterceptorInterface
+{
+    public function __construct(
+        private AgentRepositoryInterface $agents,
+        private ToolRepositoryInterface $tools,
+        private SchemaMapperInterface $schemaMapper,
+    ) {}
+    public function execute(
+        ExecutionInput $input,
+        InterceptorHandler $next,
+    ): Execution {
+        $agent = $this->agents->get($input->agent);
+        if (!$agent instanceof HasLinkedToolsInterface) {
+            return $next($input);
+        }
+        $tools = \array_map(
+            fn(ToolLink $tool): ToolInterface => $this->tools->get($tool->getName()),
+            $agent->getTools(),
+        );
+        return $next(
+            $input->withOptions(
+                $input->options->with(
+                    'tools',
+                    \array_map(
+                        fn(ToolInterface $tool): Tool => new Tool(
+                            name: $tool->getName(),
+                            description: $tool->getDescription(),
+                            parameters: $this->schemaMapper->toJsonSchema($tool->getInputSchema()),
+                            strict: false,
+                        ),
+                        $tools,
+                    ),
+                ),
+            ),
+        );
+    }
+}
+//vendor/llm-agents/agents/src/AgentExecutor/Interceptor
+namespace LLM\Agents\AgentExecutor\Interceptor;
+use LLM\Agents\Agent\AgentRepositoryInterface;
+use LLM\Agents\Agent\Execution;
+use LLM\Agents\AgentExecutor\ExecutionInput;
+use LLM\Agents\AgentExecutor\ExecutorInterceptorInterface;
+use LLM\Agents\AgentExecutor\InterceptorHandler;
+final readonly class InjectOptionsInterceptor implements ExecutorInterceptorInterface
+{
+    public function __construct(
+        private AgentRepositoryInterface $agents,
+    ) {}
+    public function execute(
+        ExecutionInput $input,
+        InterceptorHandler $next,
+    ): Execution {
+        $agent = $this->agents->get($input->agent);
+        foreach ($agent->getConfiguration() as $configuration) {
+            $input = $input->withOptions(
+                $input->options->with($configuration->key, $configuration->content),
+            );
+        }
+        return $next($input);
+    }
+}
+//vendor/llm-agents/agents/src/AgentExecutor/Interceptor
+namespace LLM\Agents\AgentExecutor\Interceptor;
+use LLM\Agents\Agent\Execution;
+use LLM\Agents\AgentExecutor\ExecutionInput;
+use LLM\Agents\AgentExecutor\ExecutorInterceptorInterface;
+use LLM\Agents\AgentExecutor\InterceptorHandler;
+use LLM\Agents\LLM\Exception\LimitExceededException;
+final readonly class TokenLimitRetryInterceptor implements ExecutorInterceptorInterface
+{
+    public function __construct(
+        private int $maxRetries = 3,
+        private int $incrementStep = 500,
+        private string $limitKey = 'max_tokens',
+    ) {}
+    public function execute(
+        ExecutionInput $input,
+        InterceptorHandler $next,
+    ): Execution {
+        $retries = 0;
+        while (true) {
+            try {
+                return $next($input);
+            } catch (LimitExceededException $e) {
+                if (++$retries > $this->maxRetries) {
+                    throw $e;
+                }
+                $newLimit = $e->currentLimit + $this->incrementStep;
+                $input = $input->withOptions(
+                    $input->options->with($this->limitKey, $newLimit),
+                );
+            }
+        }
+    }
+}
+//vendor/llm-agents/agents/src/AgentExecutor
+namespace LLM\Agents\AgentExecutor;
+use LLM\Agents\LLM\ContextInterface;
+use LLM\Agents\LLM\OptionsInterface;
+use LLM\Agents\LLM\Prompt\Chat\PromptInterface;
+use LLM\Agents\LLM\PromptContextInterface;
+/**
+ * Represents the immutable input for an agent execution.
+ *
+ * This class encapsulates all necessary information for executing an agent,
+ * including the agent key, prompt, context, options, and prompt context.
+ * It is designed to be immutable, with all modifier methods returning new instances.
+ *
+ * @example
+ * // Creating an initial ExecutionInput
+ * $input = new ExecutionInput(
+ *     agent: 'my_agent',
+ *     prompt: 'Hello, agent!',
+ *     context: $context,
+ *     options: $options,
+ *     promptContext: $promptContext
+ * );
+ *
+ * // Modifying the input (creates a new instance)
+ * $newInput = $input->withAgent(...)
+ *                   ->withPrompt(...;
+ *
+ * // The original $input remains unchanged
+ * assert($input->agent === 'my_agent');
+ * assert($newInput->agent === 'another_agent');
+ */
+final readonly class ExecutionInput
+{
+    public function __construct(
+        public string $agent,
+        public \Stringable|string|PromptInterface $prompt,
+        public ContextInterface $context,
+        public OptionsInterface $options,
+        public PromptContextInterface $promptContext,
+    ) {}
+    /**
+     * Create a new input with a different agent.
+     */
+    public function withAgent(string $agent): self
+    {
+        return new self(
+            $agent,
+            $this->prompt,
+            $this->context,
+            $this->options,
+            $this->promptContext,
+        );
+    }
+    /**
+     * Create a new input with a different prompt context.
+     */
+    public function withPromptContext(PromptContextInterface $context): self
+    {
+        return new self(
+            $this->agent,
+            $this->prompt,
+            $this->context,
+            $this->options,
+            $context,
+        );
+    }
+    /**
+     * Create a new input with a different context.
+     */
+    public function withContext(ContextInterface $context): self
+    {
+        return new self(
+            $this->agent,
+            $this->prompt,
+            $context,
+            $this->options,
+            $this->promptContext,
+        );
+    }
+    /**
+     * Create a new input with a different prompt.
+     */
+    public function withPrompt(PromptInterface $prompt): self
+    {
+        return new self(
+            $this->agent,
+            $prompt,
+            $this->context,
+            $this->options,
+            $this->promptContext,
+        );
+    }
+    /**
+     * Create a new input with different options.
+     */
+    public function withOptions(OptionsInterface $options): self
+    {
+        return new self(
+            $this->agent,
+            $this->prompt,
+            $this->context,
+            $options,
+            $this->promptContext,
+        );
+    }
+}
+//vendor/llm-agents/agents/src/AgentExecutor
+namespace LLM\Agents\AgentExecutor;
+use LLM\Agents\Agent\Execution;
+use LLM\Agents\LLM\ContextInterface;
+use LLM\Agents\LLM\OptionsInterface;
+use LLM\Agents\LLM\Prompt\Chat\Prompt;
+use LLM\Agents\LLM\Prompt\Context;
+use LLM\Agents\LLM\PromptContextInterface;
+/**
+ * This interface defines the contract for agent executors.
+ */
+interface ExecutorInterface
+{
+    /**
+     * Execute an agent task with the given parameters.
+     *
+     * This method orchestrates the execution of the agent's task, passing it through
+     * the chain of interceptors before finally generating a response from the LLM.
+     *
+     * @param string $agent The unique identifier or key of the agent to execute.
+     * @param string|\Stringable|Prompt $prompt The prompt to send to the agent.
+     * @param ContextInterface|null $context An optional execution context carrying user-specific information such as authentication details, session data, etc.
+     * @param OptionsInterface|null $options Optional configuration options specific to the LLM being used. This includes settings like temperature, max tokens, etc.
+     * @param PromptContextInterface $promptContext Additional context for prompt generation. This is used to provide extra information for generating the prompt.
+     *
+     * @throws \LLM\Agents\Agent\Exception\AgentNotFoundException If the specified agent is not found.
+     * @throws \LLM\Agents\AgentExecutor\Exception\ExecutorException If an error occurs during execution.
+     */
+    public function execute(
+        string $agent,
+        string|\Stringable|Prompt $prompt,
+        ?ContextInterface $context = null,
+        ?OptionsInterface $options = null,
+        PromptContextInterface $promptContext = new Context(),
+    ): Execution;
+    /**
+     * Add one or more interceptors to the executor's pipeline.
+     *
+     * Interceptors allow for modifying the execution flow, adding pre- or post-processing steps,
+     * or altering the behavior of the executor without changing its core implementation.
+     * This can be used for tasks such as logging, modifying the context or options, or
+     * implementing complex execution strategies.
+     */
+    public function withInterceptor(ExecutorInterceptorInterface ...$interceptor): self;
+}
+//vendor/llm-agents/agents/src/AgentExecutor
+namespace LLM\Agents\AgentExecutor;
+use LLM\Agents\Agent\Execution;
+use LLM\Agents\AgentExecutor\Exception\InvalidPromptException;
+use LLM\Agents\LLM\ContextFactoryInterface;
+use LLM\Agents\LLM\ContextInterface;
+use LLM\Agents\LLM\LLMInterface;
+use LLM\Agents\LLM\OptionsFactoryInterface;
+use LLM\Agents\LLM\OptionsInterface;
+use LLM\Agents\LLM\Prompt\Chat\Prompt;
+use LLM\Agents\LLM\Prompt\Context;
+use LLM\Agents\LLM\Prompt\PromptInterface;
+use LLM\Agents\LLM\PromptContextInterface;
+/**
+ * Implements the execution pipeline for LLM agents.
+ *
+ * This class manages the flow of execution through a series of interceptors.
+ */
+final class ExecutorPipeline implements ExecutorInterface
+{
+    /** @var ExecutorInterceptorInterface[] */
+    private array $interceptors = [];
+    private int $offset = 0;
+    public function __construct(
+        private readonly LLMInterface $llm,
+        private readonly OptionsFactoryInterface $optionsFactory,
+        private readonly ContextFactoryInterface $contextFactory,
+    ) {}
+    public function execute(
+        string $agent,
+        \Stringable|string|Prompt $prompt,
+        ?ContextInterface $context = null,
+        ?OptionsInterface $options = null,
+        PromptContextInterface $promptContext = new Context(),
+    ): Execution {
+        $context ??= $this->contextFactory->create();
+        $options ??= $this->optionsFactory->create();
+        if (!isset($this->interceptors[$this->offset])) {
+            if (!$prompt instanceof PromptInterface) {
+                throw new InvalidPromptException(\sprintf('Prompt must be an instance of %s', PromptInterface::class));
+            }
+            $result = $this->llm->generate($context, $prompt, $options);
+            return new Execution(
+                result: $result,
+                prompt: $prompt,
+            );
+        }
+        return $this->interceptors[$this->offset]->execute(
+            input: new ExecutionInput(
+                agent: $agent,
+                prompt: $prompt,
+                context: $context,
+                options: $options,
+                promptContext: $promptContext,
+            ),
+            next: new InterceptorHandler(executor: $this->next()),
+        );
+    }
+    public function withInterceptor(ExecutorInterceptorInterface ...$interceptor): ExecutorInterface
+    {
+        $pipeline = clone $this;
+        $pipeline->interceptors = \array_merge($this->interceptors, $interceptor);
+        return $pipeline;
+    }
+    private function next(): self
+    {
+        $pipeline = clone $this;
+        $pipeline->offset++;
+        return $pipeline;
+    }
+}
+//vendor/llm-agents/agents/src/AgentExecutor/Exception
+namespace LLM\Agents\AgentExecutor\Exception;
+final class InvalidPromptException extends ExecutorException
+{
+}
+//vendor/llm-agents/agents/src/AgentExecutor/Exception
+namespace LLM\Agents\AgentExecutor\Exception;
+class ExecutorException extends \DomainException
+{
+}
+//vendor/llm-agents/agents/src/Solution
 namespace LLM\Agents\Solution;
 final class Extension extends Solution
 {
@@ -601,7 +1384,7 @@ final class Extension extends Solution
         );
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Solution
+//vendor/llm-agents/agents/src/Solution
 namespace LLM\Agents\Solution;
 class AgentLink extends Solution
 {
@@ -622,11 +1405,13 @@ class AgentLink extends Solution
         return $this->name;
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Solution
+//vendor/llm-agents/agents/src/Solution
 namespace LLM\Agents\Solution;
 abstract class Solution
 {
-    /** @var array<SolutionMetadata> */
+    /**
+     * @var array<SolutionMetadata>
+     */
     private array $metadata = [];
     public function __construct(
         public readonly string $name,
@@ -642,7 +1427,7 @@ abstract class Solution
         return $this->metadata;
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Solution
+//vendor/llm-agents/agents/src/Solution
 namespace LLM\Agents\Solution;
 final class Library extends Solution
 {
@@ -657,7 +1442,7 @@ final class Library extends Solution
         );
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Solution
+//vendor/llm-agents/agents/src/Solution
 namespace LLM\Agents\Solution;
 enum MetadataType: string
 {
@@ -665,9 +1450,31 @@ enum MetadataType: string
     case Memory = 'memory';
     case Prompt = 'prompt';
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Solution
+//vendor/llm-agents/agents/src/Solution
 namespace LLM\Agents\Solution;
-final readonly class SolutionMetadata
+/**
+ * Represents a context solution that links to an embeddings source, like vector databases.
+ */
+final class ContextSourceLink extends Solution
+{
+    public function __construct(
+        string $name,
+        ?string $description = null,
+    ) {
+        parent::__construct(
+            name: $name,
+            type: SolutionType::Context,
+            description: $description,
+        );
+    }
+    public function getName(): string
+    {
+        return $this->name;
+    }
+}
+//vendor/llm-agents/agents/src/Solution
+namespace LLM\Agents\Solution;
+readonly class SolutionMetadata
 {
     public function __construct(
         public MetadataType $type,
@@ -675,7 +1482,7 @@ final readonly class SolutionMetadata
         public string|\Stringable|int $content,
     ) {}
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Solution
+//vendor/llm-agents/agents/src/Solution
 namespace LLM\Agents\Solution;
 final class Model extends Solution
 {
@@ -688,8 +1495,11 @@ final class Model extends Solution
         );
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Solution
+//vendor/llm-agents/agents/src/Solution
 namespace LLM\Agents\Solution;
+/**
+ * A tool link is a solution that points to a tool that can be used to solve a problem.
+ */
 class ToolLink extends Solution
 {
     public function __construct(
@@ -707,7 +1517,7 @@ class ToolLink extends Solution
         return $this->name;
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Solution
+//vendor/llm-agents/agents/src/Solution
 namespace LLM\Agents\Solution;
 enum SolutionType: string
 {
@@ -716,66 +1526,410 @@ enum SolutionType: string
     case Model = 'model';
     case Tool = 'tool';
     case Agent = 'agent';
+    case Context = 'context';
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/LLM
+//vendor/llm-agents/agents/src/Embeddings/Source
+namespace LLM\Agents\Embeddings\Source;
+use LLM\Agents\Embeddings\Source;
+readonly class FileSource extends Source
+{
+    public function __construct(
+        string $path,
+    ) {
+        parent::__construct('local_file', ['path' => $path]);
+    }
+}
+//vendor/llm-agents/agents/src/Embeddings
+namespace LLM\Agents\Embeddings;
+use LLM\Agents\Embeddings\Exception\EmbeddingSourceNotFoundException;
+/**
+ * This is an abstraction for retrieving embedding sources like Vector databases.
+ */
+interface EmbeddingSourceRepositoryInterface
+{
+    /**
+     * Retrieve an embedding source by name
+     *
+     * @param non-empty-string $sourceName The name of the source
+     * @throws EmbeddingSourceNotFoundException
+     */
+    public function get(string $sourceName): EmbeddingRepositoryInterface;
+}
+//vendor/llm-agents/agents/src/Embeddings
+namespace LLM\Agents\Embeddings;
+interface EmbeddingGeneratorInterface
+{
+    /**
+     * Generate embeddings for the given documents.
+     * The embeddings will be injected into the documents.
+     *
+     * @param Document ...$documents
+     * @return array<Document> List of documents with embeddings
+     */
+    public function generate(Document ...$documents): array;
+}
+//vendor/llm-agents/agents/src/Embeddings
+namespace LLM\Agents\Embeddings;
+/**
+ * Source of a document. It can be a file, a database, etc.
+ * Metadata can be used to store additional information like the path of the file or the database name.
+ */
+readonly class Source implements \JsonSerializable
+{
+    public function __construct(
+        public string $type,
+        public array $metadata = [],
+    ) {}
+    public function jsonSerialize(): array
+    {
+        return [
+            'type' => $this->type,
+            'metadata' => $this->metadata,
+        ];
+    }
+}
+//vendor/llm-agents/agents/src/Embeddings
+namespace LLM\Agents\Embeddings;
+class Document implements \Stringable, \JsonSerializable
+{
+    /** @var Embedding|null */
+    private ?Embedding $embedding;
+    public readonly string $hash;
+    public readonly int $length;
+    public function __construct(
+        public readonly string $content,
+        public readonly Source $source = new NullSource(),
+    ) {
+        $this->embedding = null;
+        $this->hash = \md5($content);
+        $this->length = \mb_strlen($content);
+    }
+    final public function withEmbedding(Embedding $embedding): self
+    {
+        $new = clone $this;
+        $new->embedding = $embedding;
+        return $new;
+    }
+    final public function hasEmbedding(): bool
+    {
+        return $this->embedding !== null;
+    }
+    final public function getEmbedding(): ?Embedding
+    {
+        return $this->embedding;
+    }
+    public function __toString(): string
+    {
+        return $this->content;
+    }
+    public function isEquals(Document $document): bool
+    {
+        return $this->hash === $document->hash;
+    }
+    public function jsonSerialize(): array
+    {
+        return [
+            'content' => $this->content,
+            'source' => $this->source,
+            'embedding' => $this->embedding,
+        ];
+    }
+}
+//vendor/llm-agents/agents/src/Embeddings
+namespace LLM\Agents\Embeddings;
+use LLM\Agents\Embeddings\Source\FileSource;
+class DocumentFactory
+{
+    public function createFromText(string $content, Source $source = new NullSource()): Document
+    {
+        return new Document($content, $source);
+    }
+    public function createFromPath(string $path): Document
+    {
+        return new Document(\file_get_contents($path), new FileSource($path));
+    }
+}
+//vendor/llm-agents/agents/src/Embeddings
+namespace LLM\Agents\Embeddings;
+interface EmbeddingSourceRegistryInterface
+{
+    /**
+     * Register a new embedding source, like Vector database.
+     */
+    public function register(string $name, EmbeddingRepositoryInterface $repository): void;
+}
+//vendor/llm-agents/agents/src/Embeddings
+namespace LLM\Agents\Embeddings;
+use LLM\Agents\Solution\ContextSourceLink;
+interface HasLinkedContextSourcesInterface
+{
+    /**
+     * Get the sources of the context storage.
+     *
+     * @return array<ContextSourceLink>
+     */
+    public function getContextSources(): array;
+}
+//vendor/llm-agents/agents/src/Embeddings
+namespace LLM\Agents\Embeddings;
+use LLM\Agents\Embeddings\Exception\EmbeddingSourceNotFoundException;
+final class EmbeddingSourceManager implements EmbeddingSourceRegistryInterface, EmbeddingSourceRepositoryInterface
+{
+    /** @var array<non-empty-string, EmbeddingRepositoryInterface> */
+    private array $sources = [];
+    public function register(string $name, EmbeddingRepositoryInterface $repository): void
+    {
+        $this->sources[$name] = $repository;
+    }
+    public function get(string $sourceName): EmbeddingRepositoryInterface
+    {
+        if (!isset($this->sources[$sourceName])) {
+            throw new EmbeddingSourceNotFoundException(\sprintf('Embedding source "%s" not found', $sourceName));
+        }
+        return $this->sources[$sourceName];
+    }
+}
+//vendor/llm-agents/agents/src/Embeddings
+namespace LLM\Agents\Embeddings;
+/**
+ * Splits a document into smaller chunks that can be processed by the
+ * embedding generator and stored in the database.
+ */
+final class DocumentSplitter
+{
+    public function split(
+        Document $document,
+        int $maxLength = 1000,
+        string $separator = ' ',
+        int $wordOverlap = 0,
+    ): array {
+        $content = $this->filterText($document->content);
+        $length = $document->length;
+        if ($content === '') {
+            return [$document];
+        }
+        if ($separator === '') {
+            return [];
+        }
+        if ($length <= $maxLength) {
+            return [$document];
+        }
+        $words = \explode($separator, $content);
+        return \array_map(
+            static fn(string $chunk): Document => new Document(
+                content: $chunk,
+                source: $document->source,
+            ),
+            $this->createChunks($words, $maxLength, $separator, $wordOverlap),
+        );
+    }
+    private function filterText(string $text): string
+    {
+        // Remove special characters (except for basic punctuation)
+        $text = \preg_replace('/[^a-zA-Z0-9\s,.!?]/', '', $text);
+        // Remove extra spaces
+        return \trim(\preg_replace('/\s+/', ' ', $text));
+    }
+    /**
+     * @param array<string> $words
+     * @return array<non-empty-string>
+     */
+    private function createChunks(array $words, int $maxLength, string $separator, int $wordOverlap): array
+    {
+        $chunks = [];
+        $chunk = '';
+        $i = 0;
+        while ($i < count($words)) {
+            // If adding the next word would exceed the chunk size, add the current chunk and start a new one
+            if (\strlen($chunk . $separator . $words[$i]) > $maxLength) {
+                $chunks[] = \trim($chunk);
+                // Set the starting point of the next chunk considering word overlap
+                $start = \max(0, $i - $wordOverlap);
+                $chunk = \implode($separator, \array_slice($words, $start, $wordOverlap));
+            }
+            $chunk .= $separator . $words[$i];
+            $i++;
+        }
+        // Add the last chunk
+        if (!empty($chunk)) {
+            $chunks[] = \trim($chunk);
+        }
+        return $chunks;
+    }
+}
+//vendor/llm-agents/agents/src/Embeddings
+namespace LLM\Agents\Embeddings;
+final readonly class NullSource extends Source
+{
+    public function __construct()
+    {
+        parent::__construct('null');
+    }
+}
+//vendor/llm-agents/agents/src/Embeddings
+namespace LLM\Agents\Embeddings;
+/**
+ * This is an abstraction for a repository that can search for similar documents based on embeddings.
+ * It can be implemented by a database, a search engine, or any other storage that can handle embeddings.
+ */
+interface EmbeddingRepositoryInterface
+{
+    /**
+     * Search for documents similar to the given embedding
+     *
+     * @param Embedding $embedding Vector representation of the document
+     * @return Document[]
+     */
+    public function search(Embedding $embedding, int $limit = 5): array;
+}
+//vendor/llm-agents/agents/src/Embeddings/Exception
+namespace LLM\Agents\Embeddings\Exception;
+class EmbeddingException extends \DomainException
+{
+}
+//vendor/llm-agents/agents/src/Embeddings/Exception
+namespace LLM\Agents\Embeddings\Exception;
+final class EmbeddingSourceNotFoundException extends EmbeddingException
+{
+}
+//vendor/llm-agents/agents/src/Embeddings
+namespace LLM\Agents\Embeddings;
+readonly class Embedding implements \Countable, \JsonSerializable
+{
+    public function __construct(
+        public array $vector,
+    ) {}
+    public function size(): int
+    {
+        return \count($this->vector);
+    }
+    public function count(): int
+    {
+        return $this->size();
+    }
+    public function jsonSerialize(): array
+    {
+        return $this->vector;
+    }
+}
+//vendor/llm-agents/agents/src/LLM
 namespace LLM\Agents\LLM;
+/**
+ * Provides a flexible and standardized way to manage configuration options for LLM client.
+ *
+ *  Example usage:
+ *  ```php
+ *  // Create a new instance of Options
+ *  $options = new Options();
+ *
+ *  // Set common LLM options
+ *  $options = $options
+ *      ->with('model', 'gpt-4')
+ *      ->with('max_tokens', 150)
+ *      ->with('temperature', 0.7)
+ *      ->with('top_p', 1.0)
+ *      ->with('frequency_penalty', 0.0)
+ *      ->with('presence_penalty', 0.0);
+ *  ```
+ * An object will be passed to the LLMInterface where it can be used to configure the LLM client.
+ */
 interface OptionsInterface extends \IteratorAggregate
 {
+    /**
+     * Check if a specific option exists.
+     */
     public function has(string $option): bool;
+    /**
+     * Get the value of a specific option.
+     */
     public function get(string $option, mixed $default = null): mixed;
+    /**
+     * Create a new instance with an additional or modified option.
+     * This method should not modify the current instance, but return a new one.
+     */
     public function with(string $option, mixed $value): static;
+    /**
+     * Merge the current options with another set of options.
+     * This method should not modify the current instance, but return a new one.
+     */
+    public function merge(OptionsInterface $options): static;
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/LLM
+//vendor/llm-agents/agents/src/LLM
 namespace LLM\Agents\LLM;
 interface ContextFactoryInterface
 {
     public function create(): ContextInterface;
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/LLM
+//vendor/llm-agents/agents/src/LLM
 namespace LLM\Agents\LLM;
 use LLM\Agents\LLM\Prompt\PromptInterface;
 use LLM\Agents\LLM\Response\Response;
+/**
+ * This interface defines the contract for LLM implementations.
+ * It provides a standardized way to generate responses from various LLM providers.
+ */
 interface LLMInterface
 {
+    /**
+     * Generate a response from the LLM based on the given prompt and context.
+     *
+     * This method is responsible for sending the prompt to the LLM, processing the response,
+     * and returning it in a standardized format.
+     *
+     * @param ContextInterface $context The context for the current request, which may include user information, session data, or other relevant details.
+     * @param PromptInterface $prompt The prompt to send to the LLM. This could be a simple string or a more complex structure containing multiple messages.
+     * @param OptionsInterface $options Additional options to customize the LLM request, such as temperature, max tokens, or other model-specific parameters.
+     *
+     * @throws \LLM\Agents\LLM\Exception\LLMException If there's an error communicating with the LLM or processing the response.
+     * @throws \LLM\Agents\LLM\Exception\RateLimitException If the LLM provider's rate limit is exceeded.
+     * @throws \LLM\Agents\LLM\Exception\TimeoutException If the request to the LLM times out.
+     * @throws \LLM\Agents\LLM\Exception\LimitExceededException If the request exceeds the LLM provider's limits (e.g., max tokens, max characters).
+     */
     public function generate(
         ContextInterface $context,
         PromptInterface $prompt,
         OptionsInterface $options,
     ): Response;
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/LLM/Prompt
+//vendor/llm-agents/agents/src/LLM/Prompt
 namespace LLM\Agents\LLM\Prompt;
-interface MessageInterface
-{
-}
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/LLM/Prompt
+interface MessageInterface {}
+//vendor/llm-agents/agents/src/LLM/Prompt
 namespace LLM\Agents\LLM\Prompt;
 interface SerializableInterface
 {
     /**
-     * Serializes prompt to array.
-     */
-    public function toArray(): array;
-    /**
      * Unpacks prompt from array.
      */
     public static function fromArray(array $data): self;
+    /**
+     * Serializes prompt to array.
+     */
+    public function toArray(): array;
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/LLM/Prompt
+//vendor/llm-agents/agents/src/LLM/Prompt
 namespace LLM\Agents\LLM\Prompt;
 interface StringPromptInterface extends PromptInterface, \Stringable
 {
     public function format(array $variables = []): string;
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/LLM/Prompt
+//vendor/llm-agents/agents/src/LLM/Prompt
 namespace LLM\Agents\LLM\Prompt;
 /**
- * Formater ("f-string") must implement https://peps.python.org/pep-3101/
+ * Formater ("f-string") must implement https://peps.python.org/pep-3101/.
  *
  * @see langchain-php
  */
 final class FString implements FormatterInterface
 {
+    public static function f(string $string, array $values = []): string
+    {
+        $transformed = [];
+        foreach ($values as $key => $value) {
+            $transformed['{' . $key . '}'] = $value;
+        }
+        return \strtr($string, $transformed);
+    }
     public function format(string $string, array $values = []): string
     {
         $transformed = [];
@@ -805,16 +1959,8 @@ final class FString implements FormatterInterface
         }
         return \array_unique($variables);
     }
-    public static function f(string $string, array $values = []): string
-    {
-        $transformed = [];
-        foreach ($values as $key => $value) {
-            $transformed['{' . $key . '}'] = $value;
-        }
-        return \strtr($string, $transformed);
-    }
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/LLM/Prompt
+//vendor/llm-agents/agents/src/LLM/Prompt
 namespace LLM\Agents\LLM\Prompt;
 readonly class Tool
 {
@@ -827,13 +1973,23 @@ readonly class Tool
         public bool $additionalProperties = false,
     ) {}
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/LLM/Prompt
+//vendor/llm-agents/agents/src/LLM/Prompt
+namespace LLM\Agents\LLM\Prompt;
+use LLM\Agents\LLM\PromptContextInterface;
+class Context implements PromptContextInterface
+{
+}
+//vendor/llm-agents/agents/src/LLM/Prompt
 namespace LLM\Agents\LLM\Prompt;
 class DataPrompt implements StringPromptInterface, SerializableInterface
 {
     public function __construct(
         protected array $variables = [],
     ) {}
+    public static function fromArray(array $data): static
+    {
+        return new static($data);
+    }
     /**
      * Creates new prompt with altered values.
      */
@@ -847,10 +2003,6 @@ class DataPrompt implements StringPromptInterface, SerializableInterface
     {
         return \json_encode(\array_merge($this->variables, $variables));
     }
-    public function __toString(): string
-    {
-        return $this->format();
-    }
     /**
      * Serializes prompt to array.
      */
@@ -858,12 +2010,12 @@ class DataPrompt implements StringPromptInterface, SerializableInterface
     {
         return $this->variables;
     }
-    public static function fromArray(array $data): static
+    public function __toString(): string
     {
-        return new static($data);
+        return $this->format();
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/LLM/Prompt
+//vendor/llm-agents/agents/src/LLM/Prompt
 namespace LLM\Agents\LLM\Prompt;
 class StringPrompt implements StringPromptInterface, SerializableInterface
 {
@@ -874,6 +2026,10 @@ class StringPrompt implements StringPromptInterface, SerializableInterface
         protected FormatterInterface $formatter = new FString(),
     ) {
         $this->template = \trim($this->template);
+    }
+    public static function fromArray(array $data, FormatterInterface $formatter = new FString()): static
+    {
+        return new static($data['template'], $data['variables'] ?? [], $formatter);
     }
     public function withValues(array $values): self
     {
@@ -895,10 +2051,6 @@ class StringPrompt implements StringPromptInterface, SerializableInterface
         }
         return $result;
     }
-    public function __toString(): string
-    {
-        return $this->format();
-    }
     public function toArray(): array
     {
         $result = [
@@ -909,12 +2061,12 @@ class StringPrompt implements StringPromptInterface, SerializableInterface
         }
         return $result;
     }
-    public static function fromArray(array $data, FormatterInterface $formatter = new FString()): static
+    public function __toString(): string
     {
-        return new static($data['template'], $data['variables'] ?? [], $formatter);
+        return $this->format();
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/LLM/Prompt
+//vendor/llm-agents/agents/src/LLM/Prompt
 namespace LLM\Agents\LLM\Prompt;
 interface PromptInterface extends MessageInterface
 {
@@ -923,7 +2075,7 @@ interface PromptInterface extends MessageInterface
      */
     public function withValues(array $values): self;
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/LLM/Prompt/Chat
+//vendor/llm-agents/agents/src/LLM/Prompt/Chat
 namespace LLM\Agents\LLM\Prompt\Chat;
 use LLM\Agents\LLM\Prompt\MessageInterface;
 use LLM\Agents\LLM\Prompt\SerializableInterface;
@@ -933,13 +2085,6 @@ readonly class ChatMessage implements MessageInterface, HasRoleInterface, Serial
         public string|array $content,
         public Role $role = Role::User,
     ) {}
-    public function toArray(): array
-    {
-        return [
-            'content' => $this->content,
-            'role' => $this->role->value,
-        ];
-    }
     public static function fromArray(array $data): static
     {
         return new ChatMessage(
@@ -947,12 +2092,19 @@ readonly class ChatMessage implements MessageInterface, HasRoleInterface, Serial
             role: Role::tryFrom($data['role']),
         );
     }
+    public function toArray(): array
+    {
+        return [
+            'content' => $this->content,
+            'role' => $this->role->value,
+        ];
+    }
     public function getRole(): Role
     {
         return $this->role;
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/LLM/Prompt/Chat
+//vendor/llm-agents/agents/src/LLM/Prompt/Chat
 namespace LLM\Agents\LLM\Prompt\Chat;
 use LLM\Agents\LLM\Prompt\MessageInterface;
 use LLM\Agents\LLM\Prompt\SerializableInterface;
@@ -963,14 +2115,6 @@ final readonly class ToolCallResultMessage implements MessageInterface, HasRoleI
         public array $content,
         public Role $role = Role::Tool,
     ) {}
-    public function toArray(): array
-    {
-        return [
-            'id' => $this->id,
-            'content' => $this->content,
-            'role' => $this->role->value,
-        ];
-    }
     public static function fromArray(array $data): self
     {
         return new self(
@@ -979,31 +2123,32 @@ final readonly class ToolCallResultMessage implements MessageInterface, HasRoleI
             role: Role::tryFrom($data['role']),
         );
     }
+    public function toArray(): array
+    {
+        return [
+            'id' => $this->id,
+            'content' => $this->content,
+            'role' => $this->role->value,
+        ];
+    }
     public function getRole(): Role
     {
         return $this->role;
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/LLM/Prompt/Chat
+//vendor/llm-agents/agents/src/LLM/Prompt/Chat
 namespace LLM\Agents\LLM\Prompt\Chat;
 use LLM\Agents\LLM\Prompt\MessageInterface;
 use LLM\Agents\LLM\Prompt\SerializableInterface;
 use LLM\Agents\LLM\Response\ToolCall;
 final class ToolCalledPrompt implements MessageInterface, SerializableInterface
 {
-    /** @param ToolCall[] $tools */
+    /**
+     * @param ToolCall[] $tools
+     */
     public function __construct(
         public array $tools = [],
     ) {}
-    public function toArray(): array
-    {
-        return [
-            'tools' => \array_map(
-                static fn(ToolCall $tool): array => $tool->toArray(),
-                $this->tools,
-            ),
-        ];
-    }
     public static function fromArray(array $data): self
     {
         return new self(
@@ -1013,8 +2158,17 @@ final class ToolCalledPrompt implements MessageInterface, SerializableInterface
             ),
         );
     }
+    public function toArray(): array
+    {
+        return [
+            'tools' => \array_map(
+                static fn(ToolCall $tool): array => $tool->toArray(),
+                $this->tools,
+            ),
+        ];
+    }
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/LLM/Prompt/Chat
+//vendor/llm-agents/agents/src/LLM/Prompt/Chat
 namespace LLM\Agents\LLM\Prompt\Chat;
 use LLM\Agents\LLM\Prompt\DataPrompt;
 use LLM\Agents\LLM\Prompt\FormatterInterface;
@@ -1024,6 +2178,11 @@ use LLM\Agents\LLM\Prompt\StringPrompt;
 use LLM\Agents\LLM\Prompt\StringPromptInterface;
 final readonly class MessagePrompt implements StringPromptInterface, HasRoleInterface, SerializableInterface
 {
+    public function __construct(
+        private StringPromptInterface $prompt,
+        public Role $role = Role::User,
+        private array $with = [],
+    ) {}
     public static function system(
         StringPromptInterface|string|\Stringable $prompt,
         array $values = [],
@@ -1068,16 +2227,11 @@ final readonly class MessagePrompt implements StringPromptInterface, HasRoleInte
             Role::fromValue($data['role']),
         );
     }
-    public function __construct(
-        private StringPromptInterface $prompt,
-        public Role $role = Role::User,
-        private array $with = [],
-    ) {}
     public function toChatMessage(array $parameters = []): ?ChatMessage
     {
         $prompt = $this->prompt;
         foreach ($this->with as $var) {
-            if (!isset($parameters[$var]) || empty($parameters[$var])) {
+            if (! isset($parameters[$var]) || empty($parameters[$var])) {
                 // condition failed
                 return null;
             }
@@ -1095,10 +2249,6 @@ final readonly class MessagePrompt implements StringPromptInterface, HasRoleInte
     {
         return $this->prompt->format($variables);
     }
-    public function __toString(): string
-    {
-        return $this->format();
-    }
     public function toArray(): array
     {
         return [
@@ -1110,8 +2260,12 @@ final readonly class MessagePrompt implements StringPromptInterface, HasRoleInte
     {
         return $this->role;
     }
+    public function __toString(): string
+    {
+        return $this->format();
+    }
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/LLM/Prompt/Chat
+//vendor/llm-agents/agents/src/LLM/Prompt/Chat
 namespace LLM\Agents\LLM\Prompt\Chat;
 use LLM\Agents\LLM\Exception\PromptException;
 use LLM\Agents\LLM\Prompt\FormatterInterface;
@@ -1126,10 +2280,23 @@ final class Prompt implements PromptInterface
         protected array $variables = [],
     ) {
         foreach ($this->messages as $message) {
-            if (!$message instanceof MessageInterface) {
+            if (! $message instanceof MessageInterface) {
                 throw new PromptException(\sprintf('Messages must be of type %s.', MessageInterface::class));
             }
         }
+    }
+    public static function fromArray(
+        array $data,
+        FormatterInterface $formatter = new FString(),
+    ): self {
+        if ($data === []) {
+            return new self();
+        }
+        $messages = \array_map(
+            static fn(array $message) => $message['class']::fromArray($message['data'], $formatter),
+            $data['messages'],
+        );
+        return new self($messages, $data['variables'] ?? []);
     }
     public function withValues(array $values): self
     {
@@ -1163,10 +2330,6 @@ final class Prompt implements PromptInterface
         }
         return $result;
     }
-    public function __toString(): string
-    {
-        return \json_encode($this->format());
-    }
     public function count(): int
     {
         return \count($this->messages);
@@ -1182,26 +2345,17 @@ final class Prompt implements PromptInterface
                 $this->messages,
             ),
         ];
-        if (!empty($this->variables)) {
+        if (! empty($this->variables)) {
             $result['variables'] = $this->variables;
         }
         return $result;
     }
-    public static function fromArray(
-        array $data,
-        FormatterInterface $formatter = new FString(),
-    ): self {
-        if ($data === []) {
-            return new self();
-        }
-        $messages = \array_map(
-            static fn(array $message) => $message['class']::fromArray($message['data'], $formatter),
-            $data['messages'],
-        );
-        return new self($messages, $data['variables'] ?? []);
+    public function __toString(): string
+    {
+        return \json_encode($this->format());
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/LLM/Prompt/Chat
+//vendor/llm-agents/agents/src/LLM/Prompt/Chat
 namespace LLM\Agents\LLM\Prompt\Chat;
 enum Role: string
 {
@@ -1220,7 +2374,7 @@ enum Role: string
         };
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/LLM/Prompt/Chat
+//vendor/llm-agents/agents/src/LLM/Prompt/Chat
 namespace LLM\Agents\LLM\Prompt\Chat;
 use LLM\Agents\LLM\Prompt\MessageInterface;
 use LLM\Agents\LLM\Prompt\PromptInterface as ChatPromptInterface;
@@ -1230,22 +2384,33 @@ interface PromptInterface extends ChatPromptInterface, \Stringable
      * @return MessageInterface[]
      */
     public function format(array $variables = []): array;
-    /** @return MessageInterface[] */
+    /**
+     * @return MessageInterface[]
+     */
     public function getMessages(): array;
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/LLM/Prompt/Chat
+//vendor/llm-agents/agents/src/LLM/Prompt/Chat
 namespace LLM\Agents\LLM\Prompt\Chat;
 interface HasRoleInterface
 {
     public function getRole(): Role;
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/LLM/Prompt
+//vendor/llm-agents/agents/src/LLM/Prompt
 namespace LLM\Agents\LLM\Prompt;
 interface FormatterInterface
 {
     public function format(string $string, array $values = []): string;
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/LLM/Response
+//vendor/llm-agents/agents/src/LLM
+namespace LLM\Agents\LLM;
+final class OptionsFactory implements OptionsFactoryInterface
+{
+    public function create(array $options = []): OptionsInterface
+    {
+        return new Options($options);
+    }
+}
+//vendor/llm-agents/agents/src/LLM/Response
 namespace LLM\Agents\LLM\Response;
 class StreamChatResponse extends ChatResponse
 {
@@ -1256,7 +2421,7 @@ class StreamChatResponse extends ChatResponse
         parent::__construct($content);
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/LLM/Response
+//vendor/llm-agents/agents/src/LLM/Response
 namespace LLM\Agents\LLM\Response;
 class Response
 {
@@ -1264,7 +2429,7 @@ class Response
         public readonly string|\Stringable|\JsonSerializable $content,
     ) {}
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/LLM/Response
+//vendor/llm-agents/agents/src/LLM/Response
 namespace LLM\Agents\LLM\Response;
 use LLM\Agents\LLM\Prompt\Chat\ChatMessage;
 use LLM\Agents\LLM\Prompt\Chat\Role;
@@ -1283,7 +2448,7 @@ class ChatResponse extends Response
         );
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/LLM/Response
+//vendor/llm-agents/agents/src/LLM/Response
 namespace LLM\Agents\LLM\Response;
 use LLM\Agents\LLM\Prompt\SerializableInterface;
 final class ToolCall implements SerializableInterface
@@ -1293,6 +2458,14 @@ final class ToolCall implements SerializableInterface
         public string $name,
         public string $arguments,
     ) {}
+    public static function fromArray(array $data): self
+    {
+        return new self(
+            id: $data['id'],
+            name: $data['name'],
+            arguments: $data['arguments'],
+        );
+    }
     public function withArguments(string $arguments): self
     {
         return new self($this->id, $this->name, $this->arguments . $arguments);
@@ -1305,16 +2478,8 @@ final class ToolCall implements SerializableInterface
             'arguments' => $this->arguments,
         ];
     }
-    public static function fromArray(array $data): self
-    {
-        return new self(
-            id: $data['id'],
-            name: $data['name'],
-            arguments: $data['arguments'],
-        );
-    }
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/LLM/Response
+//vendor/llm-agents/agents/src/LLM/Response
 namespace LLM\Agents\LLM\Response;
 enum FinishReason: string
 {
@@ -1324,7 +2489,7 @@ enum FinishReason: string
     case Timeout = 'timeout';
     case Length = 'length';
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/LLM/Response
+//vendor/llm-agents/agents/src/LLM/Response
 namespace LLM\Agents\LLM\Response;
 use LLM\Agents\LLM\Prompt\Chat\ToolCalledPrompt;
 final class ToolCalledResponse extends Response
@@ -1346,97 +2511,127 @@ final class ToolCalledResponse extends Response
         );
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/LLM
+//vendor/llm-agents/agents/src/LLM
 namespace LLM\Agents\LLM;
+/**
+ *  OptionsFactoryInterface is responsible for creating instances of Options.
+ *
+ *  This interface allows for flexible creation of option sets, potentially with
+ *  default values or initial configurations. It supports dependency injection
+ *  and makes testing easier by abstracting the creation of options.
+ */
 interface OptionsFactoryInterface
 {
-    public function create(): OptionsInterface;
+    public function create(array $options = []): OptionsInterface;
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/LLM
+//vendor/llm-agents/agents/src/LLM
+namespace LLM\Agents\LLM;
+interface PromptContextInterface { }
+//vendor/llm-agents/agents/src/LLM
+namespace LLM\Agents\LLM;
+class Options implements OptionsInterface
+{
+    private array $options;
+    public function __construct(array $options = [])
+    {
+        $this->options = $options;
+    }
+    public function has(string $option): bool
+    {
+        return isset($this->options[$option]);
+    }
+    public function get(string $option, mixed $default = null): mixed
+    {
+        return $this->options[$option] ?? $default;
+    }
+    public function with(string $option, mixed $value): static
+    {
+        $new = clone $this;
+        $new->options[$option] = $value;
+        return $new;
+    }
+    public function merge(OptionsInterface $options): static
+    {
+        $new = clone $this;
+        foreach ($options as $key => $value) {
+            $new->options[$key] = $value;
+        }
+        return $new;
+    }
+    public function getIterator(): \Traversable
+    {
+        return new \ArrayIterator($this->options);
+    }
+}
+//vendor/llm-agents/agents/src/LLM
 namespace LLM\Agents\LLM;
 use LLM\Agents\Agent\AgentInterface;
+use LLM\Agents\LLM\Prompt\Chat\Prompt;
 use LLM\Agents\LLM\Prompt\Chat\PromptInterface;
+/**
+ * Interface for generating prompts for AI agents.
+ *
+ * This interface defines the contract for classes responsible for generating
+ * prompts that will be sent to AI agents. It allows for customization of the
+ * prompt based on the specific agent, user input, and context.
+ */
 interface AgentPromptGeneratorInterface
 {
+    /**
+     * Generate a prompt for an AI agent.
+     *
+     * @param AgentInterface $agent The agent for which to generate the prompt.
+     * @param string|\Stringable $userPrompt The user's input or query.
+     * @param PromptContextInterface $context Additional context for prompt generation.
+     * @param PromptInterface $prompt An optional initial prompt to build upon.
+     *
+     * @return PromptInterface The generated prompt ready to be sent to the AI agent.
+     */
     public function generate(
         AgentInterface $agent,
-        string|\Stringable $prompt,
-        ?array $sessionContext = null,
+        string|\Stringable $userPrompt,
+        PromptContextInterface $context,
+        PromptInterface $prompt = new Prompt(),
     ): PromptInterface;
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/LLM/Exception
+//vendor/llm-agents/agents/src/LLM/Exception
 namespace LLM\Agents\LLM\Exception;
-class PromptException extends LLMException
+final class RateLimitException extends LLMException
 {
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/LLM/Exception
+//vendor/llm-agents/agents/src/LLM/Exception
 namespace LLM\Agents\LLM\Exception;
-class LLMException extends \DomainException
+class PromptException extends LLMException {}
+//vendor/llm-agents/agents/src/LLM/Exception
+namespace LLM\Agents\LLM\Exception;
+final class TimeoutException extends LLMException
 {
+    public function __construct(
+        string $message = "Request timed out",
+        int $code = 0,
+        ?\Throwable $previous = null,
+    ) {
+        parent::__construct($message, $code, $previous);
+    }
 }
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/LLM
+//vendor/llm-agents/agents/src/LLM/Exception
+namespace LLM\Agents\LLM\Exception;
+final class LimitExceededException extends LLMException
+{
+    public function __construct(
+        public readonly int $currentLimit,
+    ) {
+        parent::__construct(
+            \sprintf(
+                'Tokens limit exceeded: %d',
+                $currentLimit,
+            ),
+        );
+    }
+}
+//vendor/llm-agents/agents/src/LLM/Exception
+namespace LLM\Agents\LLM\Exception;
+class LLMException extends \DomainException {}
+//vendor/llm-agents/agents/src/LLM
 namespace LLM\Agents\LLM;
-interface ContextInterface
-{
-}
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Chat
-namespace LLM\Agents\Chat;
-interface SessionInterface
-{
-    public function updateHistory(array $messages): void;
-    public function isFinished(): bool;
-}
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Chat/Exception
-namespace LLM\Agents\Chat\Exception;
-class ChatException extends \DomainException
-{
-}
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Chat/Exception
-namespace LLM\Agents\Chat\Exception;
-final class ChatNotFoundException extends ChatException
-{
-}
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Chat/Exception
-namespace LLM\Agents\Chat\Exception;
-final class SessionNotFoundException extends ChatException
-{
-}
-///home/butschster/repos/llm-agents-php/sample-app/vendor/llm-agents/agents/src/Chat
-namespace LLM\Agents\Chat;
-use LLM\Agents\Chat\Exception\ChatNotFoundException;
-use Ramsey\Uuid\UuidInterface;
-interface ChatServiceInterface
-{
-    /**
-     * Get session by UUID.
-     *
-     * @throws ChatNotFoundException
-     */
-    public function getSession(
-        UuidInterface $sessionUuid,
-    ): SessionInterface;
-    public function updateSession(
-        SessionInterface $session,
-    ): void;
-    /**
-     * Start session on context.
-     */
-    public function startSession(
-        UuidInterface $accountUuid,
-        string $agentName,
-        string|\Stringable $message,
-    ): UuidInterface;
-    /**
-     * Ask question to chat.
-     */
-    public function ask(
-        UuidInterface $sessionUuid,
-        string|\Stringable $message,
-    ): UuidInterface;
-    /**
-     * Close session.
-     */
-    public function closeSession(
-        UuidInterface $sessionUuid,
-    ): void;
-}
+interface ContextInterface {}

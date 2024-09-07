@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace App\Agents\AgentsCaller;
 
-use App\Domain\Tool\PhpTool;
 use LLM\Agents\AgentExecutor\ExecutorInterface;
 use LLM\Agents\LLM\Prompt\Chat\ToolCallResultMessage;
 use LLM\Agents\LLM\Response\ToolCalledResponse;
 use LLM\Agents\PromptGenerator\Context;
+use LLM\Agents\Tool\PhpTool;
 use LLM\Agents\Tool\ToolExecutor;
 
 /**

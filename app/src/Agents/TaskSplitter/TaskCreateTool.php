@@ -5,12 +5,12 @@ declare(strict_types=1);
 namespace App\Agents\TaskSplitter;
 
 use App\Application\Entity\Uuid;
-use App\Domain\Tool\PhpTool;
+use LLM\Agents\Tool\PhpTool;
 use Spiral\Boot\DirectoriesInterface;
 use Spiral\Files\FilesInterface;
 
 /**
- * @extends  PhpTool<TaskCreateInput>
+ * @extends PhpTool<TaskCreateInput>
  */
 final class TaskCreateTool extends PhpTool
 {

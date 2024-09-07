@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace App\Agents\Delivery;
 
-use App\Domain\Tool\PhpTool;
 use Carbon\Carbon;
+use LLM\Agents\Tool\PhpTool;
 
 /**
- * @extends  PhpTool<DeliveryDateInput>
+ * @extends PhpTool<DeliveryDateInput>
  */
 final class GetDeliveryDateTool extends PhpTool
 {
