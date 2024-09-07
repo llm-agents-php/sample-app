@@ -9,7 +9,6 @@
         "ext-sockets": "*",
         "cycle/entity-behavior": "^1.2",
         "guzzlehttp/guzzle": "^7.0",
-        "hkulekci/qdrant": "^0.5.6",
         "internal/dload": "^0.2.2",
         "llm-agents/agent-site-status-checker": "^1.1",
         "llm-agents/agent-smart-home-control": "^1.1",
@@ -36,9 +35,7 @@
     "autoload": {
         "psr-4": {
             "App\\": "app/src",
-            "Database\\": "app/database",
-            "LLM\\Agents\\Embeddings\\": "app/Embeddings",
-            "LLM\\Agents\\ChainOfThought\\": "app/ChainOfThought"
+            "Database\\": "app/database"
         }
     },
     "autoload-dev": {
