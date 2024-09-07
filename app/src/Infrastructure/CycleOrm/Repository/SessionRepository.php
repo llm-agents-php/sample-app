@@ -33,4 +33,14 @@ final class SessionRepository extends Repository implements SessionRepositoryInt
 
         return $session;
     }
+
+    public function findOneLatest(): ?SessionInterface
+    {
+        return $this->select()->orderBy('createdAt', 'DESC')->fetchOne();
+    }
+
+    public function findAllLatest(int $limit = 3): iterable
+    {
+        return $this->select()->orderBy('createdAt', 'DESC')->limit($limit)->fetchAll();
+    }
 }

@@ -1,0 +1,588 @@
+This is an abstraction layer for the LLM Agents. It can be used as a template for creating new agents.
+//vendor/llm-agents/cli-chat/src
+namespace LLM\Agents\Chat;
+use Ramsey\Uuid\UuidInterface;
+interface SessionInterface
+{
+    public function getUuid(): UuidInterface;
+    public function getAgentName(): string;
+    public function updateHistory(array $messages): void;
+    public function isFinished(): bool;
+}
+//vendor/llm-agents/cli-chat/src
+namespace LLM\Agents\Chat;
+use LLM\Agents\Agent\Exception\InvalidBuilderStateException;
+use LLM\Agents\Agent\Execution;
+use LLM\Agents\AgentExecutor\ExecutorInterceptorInterface;
+use LLM\Agents\AgentExecutor\ExecutorInterface;
+use LLM\Agents\LLM\OptionsFactoryInterface;
+use LLM\Agents\LLM\OptionsInterface;
+use LLM\Agents\LLM\Prompt\Chat\MessagePrompt;
+use LLM\Agents\LLM\Prompt\Chat\Prompt;
+use LLM\Agents\LLM\Prompt\Context;
+use LLM\Agents\LLM\PromptContextInterface;
+use LLM\Agents\OpenAI\Client\Option;
+use LLM\Agents\OpenAI\Client\StreamChunkCallbackInterface;
+final class AgentExecutorBuilder
+{
+    private ?Prompt $prompt = null;
+    private ?string $agentKey = null;
+    private PromptContextInterface $promptContext;
+    private OptionsInterface $options;
+    /** @var ExecutorInterceptorInterface[] */
+    private array $interceptors = [];
+    public function __construct(
+        private readonly ExecutorInterface $executor,
+        OptionsFactoryInterface $optionsFactory,
+    ) {
+        $this->options = $optionsFactory->create();
+        $this->promptContext = new Context();
+    }
+    public function withStreamChunkCallback(StreamChunkCallbackInterface $callback): self
+    {
+        $self = clone $this;
+        $self->options = $this->options->with(Option::StreamChunkCallback, $callback);
+        return $self;
+    }
+    public function withPrompt(Prompt $prompt): self
+    {
+        $self = clone $this;
+        $self->prompt = $prompt;
+        return $self;
+    }
+    public function getPrompt(): ?Prompt
+    {
+        return $this->prompt;
+    }
+    public function withAgentKey(string $agentKey): self
+    {
+        $self = clone $this;
+        $self->agentKey = $agentKey;
+        return $self;
+    }
+    public function withPromptContext(PromptContextInterface $context): self
+    {
+        $self = clone $this;
+        $self->promptContext = $context;
+        return $self;
+    }
+    public function getPromptContext(): PromptContextInterface
+    {
+        return $this->promptContext;
+    }
+    public function withMessage(MessagePrompt $message): self
+    {
+        if ($this->prompt === null) {
+            throw new InvalidBuilderStateException('Cannot add message without a prompt');
+        }
+        $this->prompt = $this->prompt->withAddedMessage($message);
+        return $this;
+    }
+    public function withInterceptor(ExecutorInterceptorInterface ...$interceptors): self
+    {
+        $self = clone $this;
+        $self->interceptors = \array_merge($this->interceptors, $interceptors);
+        return $this;
+    }
+    public function ask(string|\Stringable $prompt): Execution
+    {
+        if ($this->agentKey === null) {
+            throw new InvalidBuilderStateException('Agent key is required');
+        }
+        if ($this->prompt !== null) {
+            $prompt = $this->prompt->withAddedMessage(
+                MessagePrompt::user(
+                    prompt: $prompt,
+                ),
+            );
+        }
+        $execution = $this->executor
+            ->withInterceptor(...$this->interceptors)
+            ->execute(
+                agent: $this->agentKey,
+                prompt: $prompt,
+                options: $this->options,
+                promptContext: $this->promptContext,
+            );
+        $this->prompt = $execution->prompt;
+        return $execution;
+    }
+    public function continue(): Execution
+    {
+        if ($this->agentKey === null) {
+            throw new InvalidBuilderStateException('Agent key is required');
+        }
+        $execution = $this->executor
+            ->withInterceptor(...$this->interceptors)
+            ->execute(
+                agent: $this->agentKey,
+                prompt: $this->prompt,
+                options: $this->options,
+                promptContext: $this->promptContext,
+            );
+        $this->prompt = $execution->prompt;
+        return $execution;
+    }
+    public function __clone()
+    {
+        $this->prompt = null;
+    }
+}
+//vendor/llm-agents/cli-chat/src/Console
+namespace LLM\Agents\Chat\Console;
+use Symfony\Component\Console\Cursor;
+use Symfony\Component\Console\Formatter\OutputFormatterStyle;
+use Symfony\Component\Console\Input\InputInterface;
+use Symfony\Component\Console\Output\OutputInterface;
+use Symfony\Component\Console\Style\SymfonyStyle;
+final class ChatStyle extends SymfonyStyle
+{
+    private readonly Cursor $cursor;
+    public function __construct(InputInterface $input, OutputInterface $output)
+    {
+        $formatter = $output->getFormatter();
+        $formatter->setStyle('muted', new OutputFormatterStyle('gray'));
+        $formatter->setStyle('tool_call', new OutputFormatterStyle('white', 'blue', ['bold']));
+        $formatter->setStyle('tool_result', new OutputFormatterStyle('white', 'magenta', ['bold']));
+        $formatter->setStyle('response', new OutputFormatterStyle('cyan'));
+        parent::__construct(
+            $input,
+            $output,
+        );
+        $this->cursor = new Cursor($output);
+    }
+    /**
+     * Formats a message as a block of text.
+     */
+    public function block(
+        string|array $messages,
+        ?string $type = null,
+        ?string $style = null,
+        string $prefix = ' ',
+        bool $padding = false,
+        bool $escape = true,
+    ): void {
+        parent::block($messages, $type, $style, $prefix, $padding, $escape);
+        $this->cursor->moveUp();
+    }
+}
+//vendor/llm-agents/cli-chat/src/Console
+namespace LLM\Agents\Chat\Console;
+use LLM\Agents\Agent\AgentInterface;
+use LLM\Agents\Agent\AgentRegistryInterface;
+use LLM\Agents\Chat\ChatHistoryRepositoryInterface;
+use LLM\Agents\Chat\ChatServiceInterface;
+use LLM\Agents\Tool\ToolRegistryInterface;
+use Ramsey\Uuid\UuidInterface;
+use Symfony\Component\Console\Cursor;
+use Symfony\Component\Console\Input\InputInterface;
+use Symfony\Component\Console\Output\OutputInterface;
+final class ChatSession
+{
+    private readonly ChatStyle $io;
+    private readonly Cursor $cursor;
+    private bool $firstMessage = true;
+    private bool $lastMessageCustom = false;
+    private UuidInterface $sessionUuid;
+    public function __construct(
+        InputInterface $input,
+        OutputInterface $output,
+        private readonly AgentRegistryInterface $agents,
+        private readonly ChatServiceInterface $chat,
+        private readonly ChatHistoryRepositoryInterface $chatHistory,
+        private readonly ToolRegistryInterface $tools,
+    ) {
+        $this->io = new ChatStyle($input, $output);
+        $this->cursor = new Cursor($output);
+    }
+    public function run(UuidInterface $accountUuid, string $binPath = 'app.php'): void
+    {
+        $agent = $this->selectAgent();
+        $getCommand = $this->getCommand($agent);
+        $this->sessionUuid = $this->chat->startSession(
+            accountUuid: $accountUuid,
+            agentName: $agent->getKey(),
+        );
+        $sessionInfo = [];
+        if ($this->io->isVerbose()) {
+            $sessionInfo = [
+                \sprintf('Session started with UUID: %s', $this->sessionUuid),
+            ];
+        }
+        $message = \sprintf('php %s chat:session %s -v', $binPath, $this->sessionUuid);
+        $this->io->block(\array_merge($sessionInfo, [
+            'Run the following command to see the AI response',
+            \str_repeat('-', \strlen($message)),
+            $message,
+        ]), style: 'info', padding: true);
+        while (true) {
+            $message = $getCommand();
+            if ($message === 'exit') {
+                $this->io->info('Goodbye! Closing chat session...');
+                $this->chat->closeSession($this->sessionUuid);
+                $this->chatHistory->clear($this->sessionUuid);
+                break;
+            } elseif ($message === 'refresh') {
+                continue;
+            }
+            if (!empty($message)) {
+                $this->chat->ask($this->sessionUuid, $message);
+            } else {
+                $this->io->warning('Message cannot be empty');
+            }
+        }
+    }
+    private function selectAgent(): AgentInterface
+    {
+        $availableAgents = [];
+        foreach ($this->agents->all() as $agent) {
+            $availableAgents[$agent->getKey()] = $agent->getName();
+        }
+        while (true) {
+            $agentName = $this->io->choice(
+                'Hello! Let\'s start a chat session. Please select an agent:',
+                $availableAgents,
+            );
+            if ($agentName && $this->agents->has($agentName)) {
+                $this->cursor->moveUp(\count($availableAgents) + 4);
+                // clears all the output from the current line
+                $this->cursor->clearOutput();
+                $agent = $this->agents->get($agentName);
+                $this->io->title($agent->getName());
+                // split the description into multiple lines by 200 characters
+                $this->io->block(\wordwrap($agent->getDescription(), 200, "\n", true));
+                $rows = [];
+                foreach ($agent->getTools() as $tool) {
+                    $tool = $this->tools->get($tool->name);
+                    $rows[] = [$tool->name, \wordwrap($tool->description, 70, "\n", true)];
+                }
+                $this->io->table(['Tool', 'Description'], $rows);
+                break;
+            }
+            $this->io->error('Invalid agent');
+        }
+        return $agent;
+    }
+    private function getCommand(AgentInterface $agent): callable
+    {
+        return function () use ($agent): string|null {
+            $initialPrompts = ['custom'];
+            $cursorOffset = $this->lastMessageCustom ? 5 : 4;
+            $this->lastMessageCustom = false;
+            foreach ($agent->getPrompts() as $prompt) {
+                $initialPrompts[] = $prompt->content;
+            }
+            $initialPrompts[] = 'reset';
+            $initialPrompts[] = 'exit';
+            if (!$this->firstMessage) {
+                $this->cursor->moveUp(\count($initialPrompts) + $cursorOffset);
+                // clears all the output from the current line
+                $this->cursor->clearOutput();
+                $this->cursor->moveUp();
+            }
+            if ($this->firstMessage) {
+                $this->firstMessage = false;
+            }
+            $initialPrompt = $this->io->choice('Choose a prompt:', $initialPrompts, 'custom');
+            if ($initialPrompt === 'custom') {
+                // Re-enable input echoing in case it was disabled
+                \shell_exec('stty sane');
+                $initialPrompt = $this->io->ask('You');
+                $this->lastMessageCustom = true;
+            }
+            return $initialPrompt;
+        };
+    }
+}
+//vendor/llm-agents/cli-chat/src/Console
+namespace LLM\Agents\Chat\Console;
+use LLM\Agents\Chat\ChatHistoryRepositoryInterface;
+use LLM\Agents\Chat\ChatServiceInterface;
+use LLM\Agents\Chat\Event\Message;
+use LLM\Agents\Chat\Event\MessageChunk;
+use LLM\Agents\Chat\Event\Question;
+use LLM\Agents\Chat\Event\ToolCall;
+use LLM\Agents\Chat\Event\ToolCallResult;
+use LLM\Agents\Chat\Exception\ChatNotFoundException;
+use LLM\Agents\Chat\Exception\SessionNotFoundException;
+use Ramsey\Uuid\UuidInterface;
+use Symfony\Component\Console\Input\InputInterface;
+use Symfony\Component\Console\Output\OutputInterface;
+final class ChatHistory
+{
+    private UuidInterface $sessionUuid;
+    /** @var array<non-empty-string> */
+    private array $shownMessages = [];
+    private bool $shouldStop = false;
+    private string $lastMessage = '';
+    private readonly ChatStyle $io;
+    public function __construct(
+        InputInterface $input,
+        OutputInterface $output,
+        private readonly ChatHistoryRepositoryInterface $chatHistory,
+        private readonly ChatServiceInterface $chat,
+    ) {
+        $this->io = new ChatStyle($input, $output);
+    }
+    public function run(UuidInterface $sessionUuid): void
+    {
+        $this->sessionUuid = $sessionUuid;
+        $this->io->write("\033\143");
+        $session = $this->chat->getSession($this->sessionUuid);
+        $this->io->block([
+            \sprintf('Connecting to chat session [%s]...', $this->sessionUuid),
+            \sprintf('Chat session started with agent [%s]. Press Ctrl+C to exit.', $session->getAgentName()),
+        ], style: 'info', padding: true);
+        do {
+            try {
+                $this->chat->getSession($this->sessionUuid);
+            } catch (ChatNotFoundException) {
+                throw new SessionNotFoundException('Session is closed.');
+            }
+            foreach ($this->iterateMessages() as $message) {
+                if ($message instanceof MessageChunk) {
+                    if ($this->lastMessage === '' && !$message->isLast) {
+                        $this->io->newLine();
+                    }
+                    $this->lastMessage .= $message->message;
+                    $this->io->write($line = sprintf('<%s>%s</>', 'response', $message->message));
+                    \usleep(20_000);
+                    if ($message->isLast) {
+                        if ($this->lastMessage !== '') {
+                            $this->io->newLine();
+                        }
+                        $this->lastMessage = '';
+                    }
+                } elseif ($message instanceof Question) {
+                    $this->io->block(
+                        \sprintf('> User: %s', $message->message),
+                        style: 'question',
+                        padding: true,
+                    );
+                } elseif ($message instanceof ToolCall) {
+                    $this->io->block(
+                        \sprintf(
+                            "<-- Let me call [%s] tool",
+                            $message->tool,
+                        ),
+                        style: 'tool_call',
+                        padding: true,
+                    );
+                    if ($this->io->isVerbose()) {
+                        $this->io->block(
+                            messages: \json_encode(\json_decode($message->arguments, true), \JSON_PRETTY_PRINT),
+                            style: 'muted',
+                        );
+                    }
+                } elseif ($message instanceof ToolCallResult) {
+                    $this->io->block(
+                        \sprintf(
+                            "--> [%s]",
+                            $message->tool,
+                        ),
+                        style: 'tool_result',
+                        padding: true,
+                    );
+                    if ($this->io->isVerbose()) {
+                        // unescape the JSON string
+                        $result = \str_replace('\\"', '"', $message->result);
+                        $this->io->block(
+                            messages: \json_validate($result)
+                                ? \json_encode(\json_decode($result, true), \JSON_PRETTY_PRINT)
+                                : $result,
+                            style: 'muted',
+                        );
+                    }
+                }
+            }
+            \sleep(2);
+        } while (!$this->shouldStop);
+    }
+    /**
+     * @return iterable<Message|ToolCall|ToolCallResult|MessageChunk>
+     */
+    private function iterateMessages(): iterable
+    {
+        $messages = $this->chatHistory->getMessages($this->sessionUuid);
+        foreach ($messages as $message) {
+            if ($message instanceof Message || $message instanceof Question || $message instanceof MessageChunk) {
+                if (\in_array((string) $message->uuid, $this->shownMessages, true)) {
+                    continue;
+                }
+                $this->shownMessages[] = (string) $message->uuid;
+                yield $message;
+            } elseif ($message instanceof ToolCall) {
+                if (\in_array($message->id . 'ToolCall', $this->shownMessages, true)) {
+                    continue;
+                }
+                $this->shownMessages[] = $message->id . 'ToolCall';
+                yield $message;
+            } elseif ($message instanceof ToolCallResult) {
+                if (\in_array($message->id . 'ToolCallResult', $this->shownMessages, true)) {
+                    continue;
+                }
+                $this->shownMessages[] = $message->id . 'ToolCallResult';
+                yield $message;
+            }
+        }
+    }
+}
+//vendor/llm-agents/cli-chat/src/Event
+namespace LLM\Agents\Chat\Event;
+use Ramsey\Uuid\Uuid;
+use Ramsey\Uuid\UuidInterface;
+readonly class Message
+{
+    public UuidInterface $uuid;
+    public function __construct(
+        public UuidInterface $sessionUuid,
+        public \DateTimeImmutable $createdAt,
+        public string|\Stringable $message,
+    ) {
+        $this->uuid = Uuid::uuid4();
+    }
+}
+//vendor/llm-agents/cli-chat/src/Event
+namespace LLM\Agents\Chat\Event;
+use Ramsey\Uuid\UuidInterface;
+final readonly class ToolCall
+{
+    public function __construct(
+        public UuidInterface $sessionUuid,
+        public string $id,
+        public string|\Stringable $tool,
+        public string $arguments,
+        public \DateTimeImmutable $createdAt,
+    ) {}
+}
+//vendor/llm-agents/cli-chat/src/Event
+namespace LLM\Agents\Chat\Event;
+use Ramsey\Uuid\UuidInterface;
+final readonly class MessageChunk extends Message
+{
+    public function __construct(
+        UuidInterface $sessionUuid,
+        \DateTimeImmutable $createdAt,
+        \Stringable|string $message,
+        public bool $isLast,
+    ) {
+        parent::__construct($sessionUuid, $createdAt, $message);
+    }
+}
+//vendor/llm-agents/cli-chat/src/Event
+namespace LLM\Agents\Chat\Event;
+use Ramsey\Uuid\Uuid;
+use Ramsey\Uuid\UuidInterface;
+final readonly class Question
+{
+    public UuidInterface $uuid;
+    public function __construct(
+        public UuidInterface $sessionUuid,
+        public UuidInterface $messageUuid,
+        public \DateTimeImmutable $createdAt,
+        public string|\Stringable $message,
+    ) {
+        $this->uuid = Uuid::uuid4();
+    }
+}
+//vendor/llm-agents/cli-chat/src/Event
+namespace LLM\Agents\Chat\Event;
+use Ramsey\Uuid\UuidInterface;
+final readonly class ToolCallResult
+{
+    public function __construct(
+        public UuidInterface $sessionUuid,
+        public string $id,
+        public string|\Stringable $tool,
+        public string|\Stringable $result,
+        public \DateTimeImmutable $createdAt,
+    ) {}
+}
+//vendor/llm-agents/cli-chat/src
+namespace LLM\Agents\Chat;
+enum Role: string
+{
+    case User = 'user';
+    case Bot = 'bot';
+    case Agent = 'agent';
+    case System = 'system';
+    case Tool = 'tool';
+}
+//vendor/llm-agents/cli-chat/src
+namespace LLM\Agents\Chat;
+use Ramsey\Uuid\UuidInterface;
+interface ChatHistoryRepositoryInterface
+{
+    public function clear(UuidInterface $sessionUuid): void;
+    public function getMessages(UuidInterface $sessionUuid): iterable;
+    public function addMessage(UuidInterface $sessionUuid, object $message): void;
+}
+//vendor/llm-agents/cli-chat/src
+namespace LLM\Agents\Chat;
+use LLM\Agents\Chat\Event\MessageChunk;
+use LLM\Agents\OpenAI\Client\StreamChunkCallbackInterface;
+use Psr\EventDispatcher\EventDispatcherInterface;
+use Ramsey\Uuid\UuidInterface;
+final readonly class StreamChunkCallback implements StreamChunkCallbackInterface
+{
+    public function __construct(
+        private UuidInterface $sessionUuid,
+        private ?EventDispatcherInterface $eventDispatcher = null,
+    ) {}
+    public function __invoke(?string $chunk, bool $stop, ?string $finishReason = null): void
+    {
+        $this->eventDispatcher?->dispatch(
+            new MessageChunk(
+                sessionUuid: $this->sessionUuid,
+                createdAt: new \DateTimeImmutable(),
+                message: (string) $chunk,
+                isLast: $stop,
+            ),
+        );
+    }
+}
+//vendor/llm-agents/cli-chat/src/Exception
+namespace LLM\Agents\Chat\Exception;
+class ChatException extends \DomainException
+{
+}
+//vendor/llm-agents/cli-chat/src/Exception
+namespace LLM\Agents\Chat\Exception;
+final class ChatNotFoundException extends ChatException
+{
+}
+//vendor/llm-agents/cli-chat/src/Exception
+namespace LLM\Agents\Chat\Exception;
+final class SessionNotFoundException extends ChatException
+{
+}
+//vendor/llm-agents/cli-chat/src
+namespace LLM\Agents\Chat;
+use LLM\Agents\Chat\Exception\ChatNotFoundException;
+use Ramsey\Uuid\UuidInterface;
+interface ChatServiceInterface
+{
+    /**
+     * Get session by UUID.
+     *
+     * @throws ChatNotFoundException
+     */
+    public function getSession(UuidInterface $sessionUuid): SessionInterface;
+    public function updateSession(SessionInterface $session): void;
+    /**
+     * Start session on context.
+     *
+     * @return UuidInterface Session UUID
+     */
+    public function startSession(UuidInterface $accountUuid, string $agentName): UuidInterface;
+    /**
+     * Ask question to chat.
+     *
+     * @return UuidInterface Message UUID.
+     */
+    public function ask(UuidInterface $sessionUuid, string|\Stringable $message): UuidInterface;
+    /**
+     * Close session.
+     */
+    public function closeSession(UuidInterface $sessionUuid): void;
+}

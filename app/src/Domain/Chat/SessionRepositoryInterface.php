@@ -25,4 +25,8 @@ interface SessionRepositoryInterface
      * @throws SessionNotFoundException
      */
     public function getByUuid(UuidInterface $uuid): SessionInterface;
+
+    public function findOneLatest(): ?SessionInterface;
+
+    public function findAllLatest(int $limit = 3): iterable;
 }

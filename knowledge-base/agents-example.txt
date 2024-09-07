@@ -1,6 +1,6 @@
 This is an example of Agent with Tools, Memory and Initial Prompts. It can be used as a template for creating new agents and tools.
 Important: Always use gp4-0-mini as the base model for new agents.
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/AgentsCaller
+//app/src/Agents/AgentsCaller
 namespace App\Agents\AgentsCaller;
 use Spiral\JsonSchemaGenerator\Attribute\Field;
 final class AskAgentInput
@@ -14,12 +14,13 @@ final class AskAgentInput
         public string $outputSchema,
     ) {}
 }
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/AgentsCaller
+//app/src/Agents/AgentsCaller
 namespace App\Agents\AgentsCaller;
-use App\Domain\Tool\PhpTool;
-use LLM\Agents\Agent\AgentExecutor;
+use LLM\Agents\AgentExecutor\ExecutorInterface;
 use LLM\Agents\LLM\Prompt\Chat\ToolCallResultMessage;
 use LLM\Agents\LLM\Response\ToolCalledResponse;
+use LLM\Agents\PromptGenerator\Context;
+use LLM\Agents\Tool\PhpTool;
 use LLM\Agents\Tool\ToolExecutor;
 /**
  * @extends PhpTool<AskAgentInput>
@@ -28,7 +29,7 @@ final class AskAgentTool extends PhpTool
 {
     public const NAME = 'ask_agent';
     public function __construct(
-        private readonly AgentExecutor $executor,
+        private readonly ExecutorInterface $executor,
         private readonly ToolExecutor $toolExecutor,
     ) {
         parent::__construct(
@@ -55,7 +56,7 @@ PROMPT
         );
         // TODO: make async
         while (true) {
-            $execution = $this->executor->execute($input->name, $prompt);
+            $execution = $this->executor->execute(agent: $input->name, prompt: $prompt, promptContext: new Context());
             $result = $execution->result;
             $prompt = $execution->prompt;
             if ($result instanceof ToolCalledResponse) {
@@ -75,247 +76,109 @@ PROMPT
         return \json_encode($result->content);
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SiteStatusChecker
-namespace App\Agents\SiteStatusChecker;
-use LLM\Agents\Agent\Agent;
-use LLM\Agents\Agent\AgentAggregate;
-use LLM\Agents\Solution\MetadataType;
-use LLM\Agents\Solution\Model;
+//app/src/Agents/DynamicMemoryTool
+namespace App\Agents\DynamicMemoryTool;
 use LLM\Agents\Solution\SolutionMetadata;
-use LLM\Agents\Solution\ToolLink;
-final class SiteStatusCheckerAgent extends AgentAggregate
+use Ramsey\Uuid\UuidInterface;
+use Traversable;
+final class Memories implements \IteratorAggregate
 {
-    public const NAME = 'site_status_checker';
-    public static function create(): self
+    public function __construct(
+        public readonly UuidInterface $uuid,
+        /** @var array<SolutionMetadata> */
+        public array $memories = [],
+    ) {}
+    public function addMemory(SolutionMetadata $metadata): void
     {
-        $agent = new Agent(
-            key: self::NAME,
-            name: 'Site Status Checker',
-            description: 'This agent specializes in checking the online status of websites. It can verify if a given URL is accessible, retrieve basic information about the site, and provide insights on potential issues if a site is offline.',
-            instruction: 'You are a website status checking assistant. Your primary goal is to help users determine if a website is online and provide relevant information about its status. Use the provided tools to check site availability, retrieve DNS information, and perform ping tests when necessary. Always aim to give clear, concise responses about a site\'s status and offer potential reasons or troubleshooting steps if a site appears to be offline.',
-        );
-        $aggregate = new self($agent);
-        $aggregate->addMetadata(
-        // Instructions
-            new SolutionMetadata(
-                type: MetadataType::Memory,
-                key: 'describe_decisions',
-                content: 'Before calling any tools, describe the decisions you are making and why you are making them.',
-            ),
-            new SolutionMetadata(
-                type: MetadataType::Memory,
-                key: 'check_availability_first',
-                content: 'Always start by checking the site\'s availability before using other tools.',
-            ),
-            new SolutionMetadata(
-                type: MetadataType::Memory,
-                key: 'don_not_repeat',
-                content: 'Don\'t repeat yourself. If you have already provided something, don\'t repeat it unless necessary.',
-            ),
-            new SolutionMetadata(
-                type: MetadataType::Memory,
-                key: 'offline_site_checks',
-                content: 'If a site is offline, consider checking DNS information and performing a ping test to gather more data.',
-            ),
-            new SolutionMetadata(
-                type: MetadataType::Memory,
-                key: 'explain_technical_terms',
-                content: 'Provide clear explanations of technical terms and status codes for users who may not be familiar with them.',
-            ),
-            new SolutionMetadata(
-                type: MetadataType::Memory,
-                key: 'suggest_troubleshooting',
-                content: 'Suggest common troubleshooting steps if a site appears to be offline.',
-            ),
-            // Prompts examples
-            new SolutionMetadata(
-                type: MetadataType::Prompt,
-                key: 'google',
-                content: 'Check if google.com is online.',
-            ),
-            new SolutionMetadata(
-                type: MetadataType::Prompt,
-                key: 'offline_site',
-                content: 'Can you check why buggregator.dev is offline?',
-            ),
-            new SolutionMetadata(
-                type: MetadataType::Configuration,
-                key: 'max_tokens',
-                content: 3000,
-            ),
-        );
-        $model = new Model(model: 'gpt-4o-mini');
-        $aggregate->addAssociation($model);
-        $aggregate->addAssociation(new ToolLink(name: CheckSiteAvailabilityTool::NAME));
-        $aggregate->addAssociation(new ToolLink(name: GetDNSInfoTool::NAME));
-        $aggregate->addAssociation(new ToolLink(name: PerformPingTestTool::NAME));
-        return $aggregate;
+        $this->memories[] = $metadata;
+    }
+    public function getIterator(): Traversable
+    {
+        yield from $this->memories;
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SiteStatusChecker
-namespace App\Agents\SiteStatusChecker;
-use LLM\Agents\Agent\AgentFactoryInterface;
-use LLM\Agents\Agent\AgentInterface;
-final class SiteStatusCheckerAgentFactory implements AgentFactoryInterface
+//app/src/Agents/DynamicMemoryTool
+namespace App\Agents\DynamicMemoryTool;
+use App\Application\Entity\Uuid;
+use LLM\Agents\Solution\MetadataType;
+use LLM\Agents\Solution\SolutionMetadata;
+use LLM\Agents\Tool\PhpTool;
+final class DynamicMemoryTool extends PhpTool
 {
-    public function create(): AgentInterface
-    {
-        return SiteStatusCheckerAgent::create();
-    }
-}
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SiteStatusChecker
-namespace App\Agents\SiteStatusChecker;
-use App\Domain\Tool\PhpTool;
-/**
- * @extends  PhpTool<PerformPingTestInput>
- */
-final class PerformPingTestTool extends PhpTool
-{
-    public const NAME = 'perform_ping_test';
-    public function __construct()
-    {
+    public const NAME = 'dynamic_memory';
+    public function __construct(
+        private readonly DynamicMemoryService $memoryService,
+    ) {
         parent::__construct(
             name: self::NAME,
-            inputSchema: PerformPingTestInput::class,
-            description: 'This tool performs a ping test to a specified host and returns the results, including response times and packet loss.',
+            inputSchema: DynamicMemoryInput::class,
+            description: 'Use this tool to add or update a important memory about the user. This memory will be used in the future to provide a better experience.',
         );
     }
     public function execute(object $input): string
     {
-        // Implement the actual ping test here
-        // This is a placeholder implementation
-        $command = \sprintf('ping -c %d %s', 4, \escapeshellarg($input->host));
-        \exec($command, $output, $returnVar);
-        $packetLoss = 0;
-        $avgRoundTripTime = 0;
-        foreach ($output as $line) {
-            if (str_contains($line, 'packet loss')) {
-                \preg_match('/(\d+(?:\.\d+)?)%/', $line, $matches);
-                $packetLoss = $matches[1] ?? 0;
-            }
-            if (str_contains($line, 'rtt min/avg/max')) {
-                \preg_match('/= [\d.]+\/([\d.]+)\/[\d.]+/', $line, $matches);
-                $avgRoundTripTime = $matches[1] ?? 0;
-            }
-        }
-        return \json_encode([
-            'packet_loss_percentage' => (float) $packetLoss,
-            'avg_round_trip_time_ms' => (float) $avgRoundTripTime,
-            'success' => $returnVar === 0,
-        ]);
+        $metadata = new SolutionMetadata(
+            type: MetadataType::Memory,
+            key: 'user_memory',
+            content: $input->preference,
+        );
+        $sessionUuid = Uuid::fromString($input->sessionId);
+        $this->memoryService->addMemory($sessionUuid, $metadata);
+        return 'Memory updated';
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SiteStatusChecker
-namespace App\Agents\SiteStatusChecker;
-use Spiral\JsonSchemaGenerator\Attribute\Field;
-final readonly class PerformPingTestInput
+//app/src/Agents/DynamicMemoryTool
+namespace App\Agents\DynamicMemoryTool;
+use App\Application\Entity\Uuid;
+use LLM\Agents\Solution\SolutionMetadata;
+use Psr\SimpleCache\CacheInterface;
+use Spiral\Core\Attribute\Singleton;
+#[Singleton]
+final readonly class DynamicMemoryService
 {
     public function __construct(
-        #[Field(title: 'Host', description: 'The hostname or IP address to ping')]
-        public string $host,
+        private CacheInterface $cache,
     ) {}
-}
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SiteStatusChecker
-namespace App\Agents\SiteStatusChecker;
-use Spiral\JsonSchemaGenerator\Attribute\Field;
-final readonly class GetDNSInfoInput
-{
-    public function __construct(
-        #[Field(title: 'Domain', description: 'The domain name to look up DNS information for')]
-        public string $domain,
-    ) {}
-}
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SiteStatusChecker
-namespace App\Agents\SiteStatusChecker;
-use App\Domain\Tool\PhpTool;
-/**
- * @extends  PhpTool<CheckSiteAvailabilityInput>
- */
-final class CheckSiteAvailabilityTool extends PhpTool
-{
-    public const NAME = 'check_site_availability';
-    public function __construct()
+    public function addMemory(Uuid $sessionUuid, SolutionMetadata $metadata): void
     {
-        parent::__construct(
-            name: self::NAME,
-            inputSchema: CheckSiteAvailabilityInput::class,
-            description: 'This tool checks if a given URL is accessible and returns its HTTP status code and response time.',
+        $memories = $this->getCurrentMemory($sessionUuid);
+        $memories->addMemory($metadata);
+        $this->cache->set($this->getKey($sessionUuid), $memories);
+    }
+    public function updateMemory(Uuid $sessionUuid, SolutionMetadata $metadata): void
+    {
+        $memories = $this->getCurrentMemory($sessionUuid);
+        $memories->updateMemory($metadata);
+        $this->cache->set($this->getKey($sessionUuid), $memories);
+    }
+    public function getCurrentMemory(Uuid $sessionUuid): Memories
+    {
+        return $this->cache->get($this->getKey($sessionUuid)) ?? new Memories(
+            \Ramsey\Uuid\Uuid::uuid4(),
         );
     }
-    public function execute(object $input): string
+    private function getKey(Uuid $sessionUuid): string
     {
-        $ch = \curl_init($input->url);
-        \curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_HEADER => true,
-            CURLOPT_NOBODY => true,
-            CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_MAXREDIRS => 10,
-            CURLOPT_TIMEOUT => 30,
-        ]);
-        $startTime = \microtime(true);
-        $response = \curl_exec($ch);
-        $endTime = \microtime(true);
-        $statusCode = \curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $finalUrl = \curl_getinfo($ch, CURLINFO_EFFECTIVE_URL);
-        $redirectCount = \curl_getinfo($ch, CURLINFO_REDIRECT_COUNT);
-        $responseTime = \round(($endTime - $startTime) * 1000, 2);
-        \curl_close($ch);
-        $isOnline = $statusCode >= 200 && $statusCode < 400;
-        return \json_encode([
-            'status_code' => $statusCode,
-            'response_time_ms' => $responseTime,
-            'is_online' => $isOnline,
-            'final_url' => $finalUrl,
-            'redirect_count' => $redirectCount,
-        ]);
+        return 'user_memory';
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SiteStatusChecker
-namespace App\Agents\SiteStatusChecker;
-use App\Domain\Tool\PhpTool;
-/**
- * @extends  PhpTool<GetDNSInfoInput>
- */
-final class GetDNSInfoTool extends PhpTool
-{
-    public const NAME = 'get_dns_info';
-    public function __construct()
-    {
-        parent::__construct(
-            name: self::NAME,
-            inputSchema: GetDNSInfoInput::class,
-            description: 'This tool retrieves DNS information for a given domain, including IP addresses and name servers.',
-        );
-    }
-    public function execute(object $input): string
-    {
-        // Implement the actual DNS info retrieval here
-        // This is a placeholder implementation
-        $dnsRecords = \dns_get_record($input->domain, DNS_A + DNS_NS);
-        $ipAddresses = \array_column(array_filter($dnsRecords, fn($record) => $record['type'] === 'A'), 'ip');
-        $nameServers = \array_column(array_filter($dnsRecords, fn($record) => $record['type'] === 'NS'), 'target');
-        return \json_encode([
-            'ip_addresses' => $ipAddresses,
-            'name_servers' => $nameServers,
-        ]);
-    }
-}
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SiteStatusChecker
-namespace App\Agents\SiteStatusChecker;
+//app/src/Agents/DynamicMemoryTool
+namespace App\Agents\DynamicMemoryTool;
 use Spiral\JsonSchemaGenerator\Attribute\Field;
-final readonly class CheckSiteAvailabilityInput
+final class DynamicMemoryInput
 {
     public function __construct(
-        #[Field(title: 'URL', description: 'The full URL of the website to check')]
-        public string $url,
+        #[Field(title: 'Session ID', description: 'The unique identifier for the current session')]
+        public string $sessionId,
+        #[Field(title: 'User preference', description: 'The user preference to add or update')]
+        public string $preference,
     ) {}
 }
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/TaskSplitter
+//app/src/Agents/TaskSplitter
 namespace App\Agents\TaskSplitter;
-use App\Domain\Tool\PhpTool;
+use LLM\Agents\Tool\PhpTool;
 /**
- * @extends  PhpTool<ProjectDescriptionInput>
+ * @extends PhpTool<ProjectDescriptionInput>
  */
 final class GetProjectDescription extends PhpTool
 {
@@ -357,7 +220,7 @@ TEXT
         ]);
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/TaskSplitter
+//app/src/Agents/TaskSplitter
 namespace App\Agents\TaskSplitter;
 use LLM\Agents\Agent\AgentFactoryInterface;
 use LLM\Agents\Agent\AgentInterface;
@@ -368,7 +231,7 @@ final class TaskSplitterAgentFactory implements AgentFactoryInterface
         return TaskSplitterAgent::create();
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/TaskSplitter
+//app/src/Agents/TaskSplitter
 namespace App\Agents\TaskSplitter;
 use Spiral\JsonSchemaGenerator\Attribute\Field;
 final class ProjectDescriptionInput
@@ -378,7 +241,7 @@ final class ProjectDescriptionInput
         public string $uuid,
     ) {}
 }
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/TaskSplitter
+//app/src/Agents/TaskSplitter
 namespace App\Agents\TaskSplitter;
 use Spiral\JsonSchemaGenerator\Attribute\Field;
 final readonly class TaskCreateInput
@@ -394,10 +257,12 @@ final readonly class TaskCreateInput
         public string $parentTaskUuid,
     ) {}
 }
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/TaskSplitter
+//app/src/Agents/TaskSplitter
 namespace App\Agents\TaskSplitter;
 use LLM\Agents\Agent\Agent;
 use LLM\Agents\Agent\AgentAggregate;
+use LLM\Agents\OpenAI\Client\OpenAIModel;
+use LLM\Agents\OpenAI\Client\Option;
 use LLM\Agents\Solution\MetadataType;
 use LLM\Agents\Solution\Model;
 use LLM\Agents\Solution\SolutionMetadata;
@@ -411,7 +276,11 @@ final class TaskSplitterAgent extends AgentAggregate
             key: self::NAME,
             name: 'Task Splitter',
             description: 'An agent that splits project descriptions into structured task lists.',
-            instruction: 'You are a task organization assistant. Your primary goal is to analyze project descriptions and break them down into well-structured task lists with subtasks.',
+            instruction: <<<'INSTRUCTION'
+You are a task organization assistant.
+Your primary goal is to analyze project descriptions and break them down into well-structured task lists with subtasks.
+INSTRUCTION
+            ,
         );
         $aggregate = new self($agent);
         $aggregate->addMetadata(
@@ -433,25 +302,25 @@ final class TaskSplitterAgent extends AgentAggregate
             ),
             new SolutionMetadata(
                 type: MetadataType::Configuration,
-                key: 'max_tokens',
+                key: Option::MaxTokens->value,
                 content: 3000,
             ),
         );
-        $model = new Model(model: 'gpt-4o-mini');
+        $model = new Model(model: OpenAIModel::Gpt4oMini->value);
         $aggregate->addAssociation($model);
         $aggregate->addAssociation(new ToolLink(name: TaskCreateTool::NAME));
         $aggregate->addAssociation(new ToolLink(name: GetProjectDescription::NAME));
         return $aggregate;
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/TaskSplitter
+//app/src/Agents/TaskSplitter
 namespace App\Agents\TaskSplitter;
 use App\Application\Entity\Uuid;
-use App\Domain\Tool\PhpTool;
+use LLM\Agents\Tool\PhpTool;
 use Spiral\Boot\DirectoriesInterface;
 use Spiral\Files\FilesInterface;
 /**
- * @extends  PhpTool<TaskCreateInput>
+ * @extends PhpTool<TaskCreateInput>
  */
 final class TaskCreateTool extends PhpTool
 {
@@ -499,11 +368,11 @@ CONTENT,
         return json_encode(['task_uuid' => $uuid]);
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/Delivery
+//app/src/Agents/Delivery
 namespace App\Agents\Delivery;
-use App\Domain\Tool\PhpTool;
+use LLM\Agents\Tool\PhpTool;
 /**
- * @extends  PhpTool<ProfileInput>
+ * @extends PhpTool<ProfileInput>
  */
 final class GetProfileTool extends PhpTool
 {
@@ -526,12 +395,13 @@ final class GetProfileTool extends PhpTool
         ]);
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/Delivery
+//app/src/Agents/Delivery
 namespace App\Agents\Delivery;
 use App\Agents\AgentsCaller\AskAgentTool;
-use App\Agents\SiteStatusChecker\SiteStatusCheckerAgent;
 use LLM\Agents\Agent\Agent;
 use LLM\Agents\Agent\AgentAggregate;
+use LLM\Agents\Agent\SiteStatusChecker\SiteStatusCheckerAgent;
+use LLM\Agents\OpenAI\Client\OpenAIModel;
 use LLM\Agents\Solution\AgentLink;
 use LLM\Agents\Solution\MetadataType;
 use LLM\Agents\Solution\Model;
@@ -546,7 +416,11 @@ final class DeliveryAgent extends AgentAggregate
             key: self::NAME,
             name: 'Order Assistant',
             description: 'Helps customers with order-related questions.',
-            instruction: 'You are a helpful customer support assistant. Use the supplied tools to assist the user.',
+            instruction: <<<'INSTRUCTION'
+You are a helpful customer support assistant.
+Use the supplied tools to assist the user.
+INSTRUCTION
+,
         );
         $aggregate = new self($agent);
         // Add some refiners to make the agent smarter
@@ -595,7 +469,7 @@ final class DeliveryAgent extends AgentAggregate
             ),
         );
         // Add a model to the agent
-        $model = new Model(model: 'gpt-4o-mini');
+        $model = new Model(model: OpenAIModel::Gpt4oMini->value);
         $aggregate->addAssociation($model);
         $aggregate->addAssociation(new ToolLink(name: GetDeliveryDateTool::NAME));
         $aggregate->addAssociation(new ToolLink(name: GetOrderNumberTool::NAME));
@@ -610,11 +484,11 @@ final class DeliveryAgent extends AgentAggregate
         return $aggregate;
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/Delivery
+//app/src/Agents/Delivery
 namespace App\Agents\Delivery;
-use App\Domain\Tool\PhpTool;
+use LLM\Agents\Tool\PhpTool;
 /**
- * @extends  PhpTool<OrderNumberInput>
+ * @extends PhpTool<OrderNumberInput>
  */
 final class GetOrderNumberTool extends PhpTool
 {
@@ -636,7 +510,7 @@ final class GetOrderNumberTool extends PhpTool
         ]);
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/Delivery
+//app/src/Agents/Delivery
 namespace App\Agents\Delivery;
 use LLM\Agents\Agent\AgentFactoryInterface;
 use LLM\Agents\Agent\AgentInterface;
@@ -647,7 +521,7 @@ final class DeliveryAgentFactory implements AgentFactoryInterface
         return DeliveryAgent::create();
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/Delivery
+//app/src/Agents/Delivery
 namespace App\Agents\Delivery;
 use Spiral\JsonSchemaGenerator\Attribute\Field;
 final readonly class ProfileInput
@@ -657,7 +531,7 @@ final readonly class ProfileInput
         public string $accountId,
     ) {}
 }
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/Delivery
+//app/src/Agents/Delivery
 namespace App\Agents\Delivery;
 use Spiral\JsonSchemaGenerator\Attribute\Field;
 final readonly class OrderNumberInput
@@ -667,12 +541,12 @@ final readonly class OrderNumberInput
         public string $customerId,
     ) {}
 }
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/Delivery
+//app/src/Agents/Delivery
 namespace App\Agents\Delivery;
-use App\Domain\Tool\PhpTool;
 use Carbon\Carbon;
+use LLM\Agents\Tool\PhpTool;
 /**
- * @extends  PhpTool<DeliveryDateInput>
+ * @extends PhpTool<DeliveryDateInput>
  */
 final class GetDeliveryDateTool extends PhpTool
 {
@@ -692,7 +566,7 @@ final class GetDeliveryDateTool extends PhpTool
         ]);
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/Delivery
+//app/src/Agents/Delivery
 namespace App\Agents\Delivery;
 use Spiral\JsonSchemaGenerator\Attribute\Field;
 final readonly class DeliveryDateInput
@@ -702,7 +576,7 @@ final readonly class DeliveryDateInput
         public string $orderId,
     ) {}
 }
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/Delivery
+//app/src/Agents/Delivery
 namespace App\Agents\Delivery;
 use Spiral\JsonSchemaGenerator\Attribute\Field;
 final class StatusCheckOutput
@@ -716,528 +590,13 @@ final class StatusCheckOutput
         public string $url,
     ) {}
 }
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SmartHomeControl
-namespace App\Agents\SmartHomeControl;
-use Spiral\JsonSchemaGenerator\Attribute\Field;
-final readonly class ListRoomDevicesInput
-{
-    public function __construct(
-        #[Field(title: 'Room Name', description: 'The name of the room to list devices from')]
-        public string $roomName,
-    ) {}
-}
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SmartHomeControl
-namespace App\Agents\SmartHomeControl;
-use App\Agents\SmartHomeControl\SmartHome\SmartHomeSystem;
-use App\Domain\Tool\PhpTool;
-/**
- * @extends  PhpTool<GetDeviceDetailsInput>
- */
-final class GetDeviceDetailsTool extends PhpTool
-{
-    public const NAME = 'get_device_details';
-    public function __construct(
-        private SmartHomeSystem $smartHome,
-    ) {
-        parent::__construct(
-            name: self::NAME,
-            inputSchema: GetDeviceDetailsInput::class,
-            description: 'Retrieves detailed information about a specific device.',
-        );
-    }
-    public function execute(object $input): string
-    {
-        $device = $this->smartHome->getDevice($input->deviceId);
-        if (!$device) {
-            return json_encode(['error' => 'Device not found']);
-        }
-        return json_encode([
-            'id' => $device->id,
-            'name' => $device->name,
-            'room' => $device->room,
-            'type' => get_class($device),
-            'params' => $device->getDetails(),
-        ]);
-    }
-}
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SmartHomeControl
-namespace App\Agents\SmartHomeControl;
-use Spiral\JsonSchemaGenerator\Attribute\Field;
-final readonly class ControlDeviceInput
-{
-    public function __construct(
-        #[Field(title: 'Device ID', description: 'The unique identifier of the device to control')]
-        public string $deviceId,
-        #[Field(title: 'Action', description: 'The action to perform on the device (e.g., turnOn, turnOff, setBrightness)')]
-        public string $action,
-        /**
-         * @var array<DeviceParam>
-         */
-        #[Field(title: 'Parameters', description: 'Additional parameters for the action. If the action does not require parameters, this field should be an empty array')]
-        public array $params,
-    ) {}
-}
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SmartHomeControl
-namespace App\Agents\SmartHomeControl;
-use App\Agents\SmartHomeControl\SmartHome\SmartHomeSystem;
-use App\Domain\Tool\PhpTool;
-/**
- * @extends  PhpTool<ListRoomDevicesInput>
- */
-final class ListRoomDevicesTool extends PhpTool
-{
-    public const NAME = 'list_room_devices';
-    public function __construct(
-        private readonly SmartHomeSystem $smartHome,
-    ) {
-        parent::__construct(
-            name: self::NAME,
-            inputSchema: ListRoomDevicesInput::class,
-            description: 'Lists all smart devices in a specified room.',
-        );
-    }
-    public function execute(object $input): string
-    {
-        $devices = $this->smartHome->getRoomDevices($input->roomName);
-        $deviceList = [];
-        foreach ($devices as $device) {
-            $deviceList[] = [
-                'id' => $device->id,
-                'name' => $device->name,
-                'type' => get_class($device),
-                'status' => $device->getStatus() ? 'on' : 'off',
-            ];
-        }
-        return json_encode([
-            'room' => $input->roomName,
-            'devices' => $deviceList,
-        ]);
-    }
-}
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SmartHomeControl
-namespace App\Agents\SmartHomeControl;
-use App\Agents\SmartHomeControl\SmartHome\SmartHomeSystem;
-use App\Domain\Tool\PhpTool;
-/**
- * @extends  PhpTool<ControlDeviceInput>
- */
-final class ControlDeviceTool extends PhpTool
-{
-    public const NAME = 'control_device';
-    public function __construct(
-        private SmartHomeSystem $smartHome,
-    ) {
-        parent::__construct(
-            name: self::NAME,
-            inputSchema: ControlDeviceInput::class,
-            description: 'Controls a specific device by performing the specified action with given parameters.',
-        );
-    }
-    public function execute(object $input): string
-    {
-        $result = $this->smartHome->controlDevice($input->deviceId, $input->action, $input->params);
-        if (isset($result['error'])) {
-            return json_encode(['error' => $result['error']]);
-        }
-        return json_encode([
-            'id' => $input->deviceId,
-            'action' => $input->action,
-        ]);
-    }
-}
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SmartHomeControl
-namespace App\Agents\SmartHomeControl;
-use Spiral\JsonSchemaGenerator\Attribute\Field;
-final readonly class GetDeviceDetailsInput
-{
-    public function __construct(
-        #[Field(title: 'Device ID', description: 'The unique identifier of the device')]
-        public string $deviceId,
-    ) {}
-}
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SmartHomeControl
-namespace App\Agents\SmartHomeControl;
-use Spiral\JsonSchemaGenerator\Attribute\Field;
-final readonly class GetRoomListInput
-{
-    public function __construct(
-        // The input parameter is the name of the room to list devices from
-        #[Field(title: 'Home Name', description: 'The name of the home to list rooms from')]
-        public string $home,
-    ) {
-    }
-}
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SmartHomeControl/SmartHome
-namespace App\Agents\SmartHomeControl\SmartHome;
-use App\Agents\SmartHomeControl\SmartHome\Devices\Light;
-use App\Agents\SmartHomeControl\SmartHome\Devices\SmartAppliance;
-use App\Agents\SmartHomeControl\SmartHome\Devices\SmartDevice;
-use App\Agents\SmartHomeControl\SmartHome\Devices\Thermostat;
-use App\Agents\SmartHomeControl\SmartHome\Devices\TV;
-use Spiral\Core\Attribute\Singleton;
-#[Singleton]
-final class SmartHomeSystem
-{
-    /** @var array<string, SmartDevice> */
-    private array $devices = [];
-    public function addDevice(SmartDevice $device): void
-    {
-        $this->devices[$device->id] = $device;
-    }
-    public function getDevice(string $id): ?SmartDevice
-    {
-        return $this->devices[$id] ?? null;
-    }
-    public function getRoomList(): array
-    {
-        $rooms = \array_unique(\array_map(fn($device) => $device->room, $this->devices));
-        \sort($rooms);
-        return $rooms;
-    }
-    public function getRoomDevices(string $room): array
-    {
-        return \array_filter($this->devices, static fn($device): bool => $device->room === $room);
-    }
-    public function controlDevice(string $id, string $action, array $params = []): array
-    {
-        $device = $this->getDevice($id);
-        if (!$device) {
-            return ['error' => 'Device not found'];
-        }
-        switch ($action) {
-            case 'turnOn':
-                $device->turnOn();
-                break;
-            case 'turnOff':
-                $device->turnOff();
-                break;
-            case 'setBrightness':
-                if ($device instanceof Light && isset($params['brightness'])) {
-                    $device->setBrightness($params['brightness']);
-                }
-                break;
-            case 'setColor':
-                if ($device instanceof Light && isset($params['color'])) {
-                    $device->setColor($params['color']);
-                }
-                break;
-            case 'setTemperature':
-                if ($device instanceof Thermostat && isset($params['temperature'])) {
-                    $device->setTemperature($params['temperature']);
-                }
-                break;
-            case 'setThermostatMode':
-                if ($device instanceof Thermostat && isset($params['mode'])) {
-                    $device->setMode($params['mode']);
-                }
-                break;
-            case 'setTVVolume':
-                if ($device instanceof TV && isset($params['volume'])) {
-                    $device->setVolume($params['volume']);
-                }
-                break;
-            case 'setTVInput':
-                if ($device instanceof TV && isset($params['input'])) {
-                    $device->setInput($params['input']);
-                }
-                break;
-            case 'setApplianceAttribute':
-                if ($device instanceof SmartAppliance && isset($params['key'], $params['value'])) {
-                    $device->setAttribute($params['key'], $params['value']);
-                }
-                break;
-            default:
-                return ['error' => 'Invalid action'];
-        }
-        return $device->getDetails();
-    }
-}
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SmartHomeControl/SmartHome/Devices
-namespace App\Agents\SmartHomeControl\SmartHome\Devices;
-final class TV extends SmartDevice
-{
-    public function __construct(
-        string $id,
-        string $name,
-        string $room,
-        protected int $volume = 0,
-        protected string $input = 'HDMI 1',
-    ) {
-        parent::__construct($id, $name, $room);
-    }
-    public function setVolume(int $volume): void
-    {
-        $this->volume = max(0, min(100, $volume));
-    }
-    public function setInput(string $input): void
-    {
-        $this->input = $input;
-    }
-    public function getDetails(): array
-    {
-        return [
-            'status' => $this->status ? 'on' : 'off',
-            'volume' => $this->volume,
-            'input' => $this->input,
-        ];
-    }
-}
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SmartHomeControl/SmartHome/Devices
-namespace App\Agents\SmartHomeControl\SmartHome\Devices;
-final class SmartAppliance extends SmartDevice
-{
-    public function __construct(
-        string $id,
-        string $name,
-        string $room,
-        public readonly string $type,
-        protected array $attributes = [],
-    ) {
-        parent::__construct($id, $name, $room);
-    }
-    public function setAttribute(string $key, $value): void
-    {
-        $this->attributes[$key] = $value;
-    }
-    public function getAttribute(string $key)
-    {
-        return $this->attributes[$key] ?? null;
-    }
-    public function getDetails(): array
-    {
-        return array_merge(
-            ['status' => $this->status ? 'on' : 'off', 'type' => $this->type],
-            $this->attributes,
-        );
-    }
-}
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SmartHomeControl/SmartHome/Devices
-namespace App\Agents\SmartHomeControl\SmartHome\Devices;
-final class Light extends SmartDevice
-{
-    public function __construct(
-        string $id,
-        string $name,
-        string $room,
-        public readonly string $type,
-        protected int $brightness = 0,
-        protected ?string $color = null,
-    ) {
-        parent::__construct($id, $name, $room);
-    }
-    public function setBrightness(int $level): void
-    {
-        $this->brightness = max(0, min(100, $level));
-        $this->status = $this->brightness > 0;
-    }
-    public function setColor(?string $color): void
-    {
-        $this->color = $color;
-    }
-    public function getDetails(): array
-    {
-        return [
-            'type' => $this->type,
-            'status' => $this->status ? 'on' : 'off',
-            'brightness' => $this->brightness,
-            'color' => $this->color,
-        ];
-    }
-}
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SmartHomeControl/SmartHome/Devices
-namespace App\Agents\SmartHomeControl\SmartHome\Devices;
-final class Thermostat extends SmartDevice
-{
-    public function __construct(
-        string $id,
-        string $name,
-        string $room,
-        protected int $temperature = 72,
-        protected string $mode = 'auto',
-    ) {
-        parent::__construct($id, $name, $room, true);
-    }
-    public function setTemperature(int $temperature): void
-    {
-        $this->temperature = $temperature;
-    }
-    public function setMode(string $mode): void
-    {
-        $this->mode = $mode;
-    }
-    public function getDetails(): array
-    {
-        return [
-            'status' => $this->status ? 'on' : 'off',
-            'temperature' => $this->temperature,
-            'mode' => $this->mode,
-        ];
-    }
-}
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SmartHomeControl/SmartHome/Devices
-namespace App\Agents\SmartHomeControl\SmartHome\Devices;
-abstract class SmartDevice
-{
-    public function __construct(
-        public readonly string $id,
-        public readonly string $name,
-        public readonly string $room,
-        protected bool $status = false,
-    ) {}
-    public function turnOn(): void
-    {
-        $this->status = true;
-    }
-    public function turnOff(): void
-    {
-        $this->status = false;
-    }
-    public function getStatus(): bool
-    {
-        return $this->status;
-    }
-    abstract public function getDetails(): array;
-}
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SmartHomeControl
-namespace App\Agents\SmartHomeControl;
-use LLM\Agents\Agent\Agent;
-use LLM\Agents\Agent\AgentAggregate;
-use LLM\Agents\Solution\MetadataType;
-use LLM\Agents\Solution\Model;
-use LLM\Agents\Solution\SolutionMetadata;
-use LLM\Agents\Solution\ToolLink;
-final class SmartHomeControlAgent extends AgentAggregate
-{
-    public const NAME = 'smart_home_control';
-    public static function create(): self
-    {
-        $agent = new Agent(
-            key: self::NAME,
-            name: 'Smart Home Control Assistant',
-            description: 'This agent manages and controls various smart home devices across multiple rooms, including lights, fireplaces, and TVs.',
-            instruction: 'You are a Smart Home Control Assistant. Your primary goal is to help users manage their smart home devices efficiently.',
-        );
-        $aggregate = new self($agent);
-        $aggregate->addMetadata(
-            new SolutionMetadata(
-                type: MetadataType::Memory,
-                key: 'room_validation',
-                content: 'Important! Before request devices in any room, use the get_room_list tool to know correct room names.',
-            ),
-            new SolutionMetadata(
-                type: MetadataType::Memory,
-                key: 'energy_efficiency',
-                content: 'Remember to suggest energy-efficient settings when appropriate.',
-            ),
-            new SolutionMetadata(
-                type: MetadataType::Memory,
-                key: 'device_status',
-                content: 'Important! Check device status before performing any action. Because a state can be changed by another user or system.',
-            ),
-            new SolutionMetadata(
-                type: MetadataType::Memory,
-                key: 'home_name',
-                content: 'We are currently in the "Home" home.',
-            ),
-            new SolutionMetadata(
-                type: MetadataType::Configuration,
-                key: 'max_tokens',
-                content: 3000,
-            ),
-            new SolutionMetadata(
-                type: MetadataType::Prompt,
-                key: 'query_devices',
-                content: 'What devices are in the living room?',
-            ),
-            new SolutionMetadata(
-                type: MetadataType::Prompt,
-                key: 'control_light',
-                content: 'Turn on the lights in the bedroom.',
-            ),
-            new SolutionMetadata(
-                type: MetadataType::Prompt,
-                key: 'control_fireplace',
-                content: 'Set the fireplace in the living room to medium intensity.',
-            ),
-            new SolutionMetadata(
-                type: MetadataType::Prompt,
-                key: 'control_tv',
-                content: 'Today is rainy. I\'m in the living room and in a bad mood, could you do something to cheer me up?',
-            ),
-            new SolutionMetadata(
-                type: MetadataType::Prompt,
-                key: 'check_device_status',
-                content: 'Is the kitchen light on?',
-            ),
-            new SolutionMetadata(
-                type: MetadataType::Prompt,
-                key: 'control_multiple_devices',
-                content: 'Turn off all devices in the master bedroom.',
-            ),
-        );
-        $model = new Model(model: 'gpt-4o-mini');
-        $aggregate->addAssociation($model);
-        $aggregate->addAssociation(new ToolLink(name: ListRoomDevicesTool::NAME));
-        $aggregate->addAssociation(new ToolLink(name: GetDeviceDetailsTool::NAME));
-        $aggregate->addAssociation(new ToolLink(name: ControlDeviceTool::NAME));
-        $aggregate->addAssociation(new ToolLink(name: GetRoomListTool::NAME));
-        return $aggregate;
-    }
-}
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SmartHomeControl
-namespace App\Agents\SmartHomeControl;
-use App\Agents\SmartHomeControl\SmartHome\SmartHomeSystem;
-use App\Domain\Tool\PhpTool;
-/**
- * @extends  PhpTool<GetRoomListInput>
- */
-final class GetRoomListTool extends PhpTool
-{
-    public const NAME = 'get_room_list';
-    public function __construct(
-        private readonly SmartHomeSystem $smartHome,
-    ) {
-        parent::__construct(
-            name: self::NAME,
-            inputSchema: GetRoomListInput::class,
-            description: 'Retrieves a list of all room names in the smart home system.',
-        );
-    }
-    public function execute(object $input): string
-    {
-        $rooms = $this->smartHome->getRoomList();
-        return \json_encode([
-            'rooms' => $rooms,
-        ]);
-    }
-}
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SmartHomeControl
-namespace App\Agents\SmartHomeControl;
-use LLM\Agents\Agent\AgentFactoryInterface;
-use LLM\Agents\Agent\AgentInterface;
-final class SmartHomeControlAgentFactory implements AgentFactoryInterface
-{
-    public function create(): AgentInterface
-    {
-        return SmartHomeControlAgent::create();
-    }
-}
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/SmartHomeControl
-namespace App\Agents\SmartHomeControl;
-use Spiral\JsonSchemaGenerator\Attribute\Field;
-final class DeviceParam
-{
-    public function __construct(
-        #[Field(title: 'Param name', description: 'The name of the parameter')]
-        public string $name,
-        #[Field(title: 'Param value', description: 'The value of the parameter')]
-        public string $value,
-    ) {}
-}
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/CodeReviewer
+//app/src/Agents/CodeReviewer
 namespace App\Agents\CodeReviewer;
 use LLM\Agents\Agent\Agent;
 use LLM\Agents\Agent\AgentAggregate;
+use LLM\Agents\OpenAI\Client\OpenAIModel;
+use LLM\Agents\OpenAI\Client\Option;
+use LLM\Agents\Solution\ContextSourceLink;
 use LLM\Agents\Solution\MetadataType;
 use LLM\Agents\Solution\Model;
 use LLM\Agents\Solution\SolutionMetadata;
@@ -1250,7 +609,11 @@ final class CodeReviewAgent extends AgentAggregate
             key: 'code_review',
             name: 'Code Reviewer',
             description: 'Agent can list files in project with given id and then open each file and review the code',
-            instruction: 'You are a code review assistant. Use the provided tools to list project files, read their contents, and submit a code review for each file.',
+            instruction: <<<'INSTRUCTION'
+You are a code review assistant in Spiral Framework.
+Use the provided tools to list project files, read their contents, and submit a code review for each file.
+INSTRUCTION
+            ,
         );
         $aggregate = new self($agent);
         $aggregate->addMetadata(
@@ -1271,19 +634,20 @@ final class CodeReviewAgent extends AgentAggregate
             ),
             new SolutionMetadata(
                 type: MetadataType::Configuration,
-                key: 'max_tokens',
+                key: Option::MaxTokens->value,
                 content: 3000,
             ),
         );
-        $model = new Model(model: 'gpt-4o-mini');
+        $model = new Model(model: OpenAIModel::Gpt4oMini->value);
         $aggregate->addAssociation($model);
         $aggregate->addAssociation(new ToolLink(name: ListProjectTool::NAME));
         $aggregate->addAssociation(new ToolLink(name: ReadFileTool::NAME));
         $aggregate->addAssociation(new ToolLink(name: ReviewTool::NAME));
+        $aggregate->addAssociation(new ContextSourceLink(name: 'spiral-docs'));
         return $aggregate;
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/CodeReviewer
+//app/src/Agents/CodeReviewer
 namespace App\Agents\CodeReviewer;
 use Spiral\JsonSchemaGenerator\Attribute\Field;
 final class ListProjectInput
@@ -1293,7 +657,7 @@ final class ListProjectInput
         public string $name,
     ) {}
 }
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/CodeReviewer
+//app/src/Agents/CodeReviewer
 namespace App\Agents\CodeReviewer;
 use Spiral\JsonSchemaGenerator\Attribute\Field;
 final class ReviewInput
@@ -1307,7 +671,7 @@ final class ReviewInput
         public string $result,
     ) {}
 }
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/CodeReviewer
+//app/src/Agents/CodeReviewer
 namespace App\Agents\CodeReviewer;
 use Spiral\JsonSchemaGenerator\Attribute\Field;
 final class ReadFileInput
@@ -1317,9 +681,9 @@ final class ReadFileInput
         public string $path,
     ) {}
 }
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/CodeReviewer
+//app/src/Agents/CodeReviewer
 namespace App\Agents\CodeReviewer;
-use App\Domain\Tool\PhpTool;
+use LLM\Agents\Tool\PhpTool;
 /**
  * @extends PhpTool<ListProjectInput>
  */
@@ -1340,9 +704,9 @@ final class ListProjectTool extends PhpTool
         return json_encode(['files' => ['file1.php', 'file2.php']]);
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/CodeReviewer
+//app/src/Agents/CodeReviewer
 namespace App\Agents\CodeReviewer;
-use App\Domain\Tool\PhpTool;
+use LLM\Agents\Tool\PhpTool;
 /**
  * @extends  PhpTool<ReviewInput>
  */
@@ -1363,7 +727,7 @@ final class ReviewTool extends PhpTool
         return json_encode(['status' => 'OK']);
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/CodeReviewer
+//app/src/Agents/CodeReviewer
 namespace App\Agents\CodeReviewer;
 use LLM\Agents\Agent\AgentFactoryInterface;
 use LLM\Agents\Agent\AgentInterface;
@@ -1374,9 +738,9 @@ final class CodeReviewAgentFactory implements AgentFactoryInterface
         return CodeReviewAgent::create();
     }
 }
-///home/butschster/repos/llm-agents-php/sample-app/app/src/Agents/CodeReviewer
+//app/src/Agents/CodeReviewer
 namespace App\Agents\CodeReviewer;
-use App\Domain\Tool\PhpTool;
+use LLM\Agents\Tool\PhpTool;
 /**
  * @extends PhpTool<ReadFileInput>
  */
@@ -1446,5 +810,946 @@ PHP,
             ]);
         }
         return 'File not found';
+    }
+}
+//vendor/llm-agents/agent-site-status-checker/src
+namespace LLM\Agents\Agent\SiteStatusChecker;
+use LLM\Agents\Agent\Agent;
+use LLM\Agents\Agent\AgentAggregate;
+use LLM\Agents\Solution\MetadataType;
+use LLM\Agents\Solution\Model;
+use LLM\Agents\Solution\SolutionMetadata;
+use LLM\Agents\Solution\ToolLink;
+final class SiteStatusCheckerAgent extends AgentAggregate
+{
+    public const DEFAULT_MODEL = 'gpt-4o-mini';
+    public const NAME = 'site_status_checker';
+    public static function create(string $model = self::DEFAULT_MODEL): self
+    {
+        $agent = new Agent(
+            key: self::NAME,
+            name: 'Site Status Checker',
+            description: 'This agent specializes in checking the online status of websites. It can verify if a given URL is accessible, retrieve basic information about the site, and provide insights on potential issues if a site is offline.',
+            instruction: 'You are a website status checking assistant. Your primary goal is to help users determine if a website is online and provide relevant information about its status. Use the provided tools to check site availability, retrieve DNS information, and perform ping tests when necessary. Always aim to give clear, concise responses about a site\'s status and offer potential reasons or troubleshooting steps if a site appears to be offline.',
+        );
+        $aggregate = new self($agent);
+        $aggregate->addMetadata(
+            // Instructions
+            new SolutionMetadata(
+                type: MetadataType::Memory,
+                key: 'describe_decisions',
+                content: 'Before calling any tools, describe the decisions you are making and why you are making them.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Memory,
+                key: 'check_availability_first',
+                content: 'Always start by checking the site\'s availability before using other tools.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Memory,
+                key: 'don_not_repeat',
+                content: 'Don\'t repeat yourself. If you have already provided something, don\'t repeat it unless necessary.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Memory,
+                key: 'offline_site_checks',
+                content: 'If a site is offline, consider checking DNS information and performing a ping test to gather more data.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Memory,
+                key: 'explain_technical_terms',
+                content: 'Provide clear explanations of technical terms and status codes for users who may not be familiar with them.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Memory,
+                key: 'suggest_troubleshooting',
+                content: 'Suggest common troubleshooting steps if a site appears to be offline.',
+            ),
+            // Prompts examples
+            new SolutionMetadata(
+                type: MetadataType::Prompt,
+                key: 'google',
+                content: 'Check if google.com is online.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Prompt,
+                key: 'offline_site',
+                content: 'Can you check why buggregator.dev is offline?',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Configuration,
+                key: 'max_tokens',
+                content: 3000,
+            ),
+        );
+        $aggregate->addAssociation(
+            new Model(model: $model)
+        );
+        $aggregate->addAssociation(new ToolLink(name: CheckSiteAvailabilityTool::NAME));
+        $aggregate->addAssociation(new ToolLink(name: GetDNSInfoTool::NAME));
+        $aggregate->addAssociation(new ToolLink(name: PerformPingTestTool::NAME));
+        return $aggregate;
+    }
+}
+//vendor/llm-agents/agent-site-status-checker/src
+namespace LLM\Agents\Agent\SiteStatusChecker;
+use LLM\Agents\Agent\AgentFactoryInterface;
+use LLM\Agents\Agent\AgentInterface;
+final readonly class SiteStatusCheckerAgentFactory implements AgentFactoryInterface
+{
+    public function create(string $model = SiteStatusCheckerAgent::DEFAULT_MODEL): AgentInterface
+    {
+        return SiteStatusCheckerAgent::create(
+            model: $model,
+        );
+    }
+}
+//vendor/llm-agents/agent-site-status-checker/src
+namespace LLM\Agents\Agent\SiteStatusChecker;
+/**
+ * @extends PhpTool<PerformPingTestInput>
+ */
+final class PerformPingTestTool extends PhpTool
+{
+    public const NAME = 'perform_ping_test';
+    public function __construct()
+    {
+        parent::__construct(
+            name: self::NAME,
+            inputSchema: PerformPingTestInput::class,
+            description: 'This tool performs a ping test to a specified host and returns the results, including response times and packet loss.',
+        );
+    }
+    public function execute(object $input): string
+    {
+        // Implement the actual ping test here
+        // This is a placeholder implementation
+        $command = \sprintf('ping -c %d %s', 4, \escapeshellarg($input->host));
+        \exec($command, $output, $returnVar);
+        $packetLoss = 0;
+        $avgRoundTripTime = 0;
+        foreach ($output as $line) {
+            if (str_contains($line, 'packet loss')) {
+                \preg_match('/(\d+(?:\.\d+)?)%/', $line, $matches);
+                $packetLoss = $matches[1] ?? 0;
+            }
+            if (str_contains($line, 'rtt min/avg/max')) {
+                \preg_match('/= [\d.]+\/([\d.]+)\/[\d.]+/', $line, $matches);
+                $avgRoundTripTime = $matches[1] ?? 0;
+            }
+        }
+        return \json_encode([
+            'packet_loss_percentage' => (float) $packetLoss,
+            'avg_round_trip_time_ms' => (float) $avgRoundTripTime,
+            'success' => $returnVar === 0,
+        ]);
+    }
+}
+//vendor/llm-agents/agent-site-status-checker/src
+namespace LLM\Agents\Agent\SiteStatusChecker;
+use Spiral\JsonSchemaGenerator\Attribute\Field;
+final readonly class PerformPingTestInput
+{
+    public function __construct(
+        #[Field(title: 'Host', description: 'The hostname or IP address to ping')]
+        public string $host,
+        #[Field(title: 'Steps', description: 'The number of times to ping the host')]
+        public int $steps = 3
+    ) {}
+}
+//vendor/llm-agents/agent-site-status-checker/src
+namespace LLM\Agents\Agent\SiteStatusChecker;
+use Spiral\JsonSchemaGenerator\Attribute\Field;
+final readonly class GetDNSInfoInput
+{
+    public function __construct(
+        #[Field(title: 'Domain', description: 'The domain name to look up DNS information for')]
+        public string $domain,
+    ) {}
+}
+//vendor/llm-agents/agent-site-status-checker/src
+namespace LLM\Agents\Agent\SiteStatusChecker;
+/**
+ * @extends PhpTool<CheckSiteAvailabilityInput>
+ */
+final class CheckSiteAvailabilityTool extends PhpTool
+{
+    public const NAME = 'check_site_availability';
+    public function __construct()
+    {
+        parent::__construct(
+            name: self::NAME,
+            inputSchema: CheckSiteAvailabilityInput::class,
+            description: 'This tool checks if a given URL is accessible and returns its HTTP status code and response time.',
+        );
+    }
+    public function execute(object $input): string
+    {
+        $ch = \curl_init($input->url);
+        \curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HEADER => true,
+            CURLOPT_NOBODY => true,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_MAXREDIRS => 10,
+            CURLOPT_TIMEOUT => 30,
+        ]);
+        $startTime = \microtime(true);
+        $response = \curl_exec($ch);
+        $endTime = \microtime(true);
+        $statusCode = \curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $finalUrl = \curl_getinfo($ch, CURLINFO_EFFECTIVE_URL);
+        $redirectCount = \curl_getinfo($ch, CURLINFO_REDIRECT_COUNT);
+        $responseTime = \round(($endTime - $startTime) * 1000, 2);
+        \curl_close($ch);
+        $isOnline = $statusCode >= 200 && $statusCode < 400;
+        return \json_encode([
+            'status_code' => $statusCode,
+            'response_time_ms' => $responseTime,
+            'is_online' => $isOnline,
+            'final_url' => $finalUrl,
+            'redirect_count' => $redirectCount,
+        ]);
+    }
+}
+//vendor/llm-agents/agent-site-status-checker/src
+namespace LLM\Agents\Agent\SiteStatusChecker;
+use LLM\Agents\Tool\Tool;
+use LLM\Agents\Tool\ToolLanguage;
+abstract class PhpTool extends Tool
+{
+    public function getLanguage(): ToolLanguage
+    {
+        return ToolLanguage::PHP;
+    }
+}
+//vendor/llm-agents/agent-site-status-checker/src/Integrations/Spiral
+namespace LLM\Agents\Agent\SiteStatusChecker\Integrations\Spiral;
+use LLM\Agents\Agent\AgentRegistryInterface;
+use LLM\Agents\Agent\SiteStatusChecker\CheckSiteAvailabilityTool;
+use LLM\Agents\Agent\SiteStatusChecker\GetDNSInfoTool;
+use LLM\Agents\Agent\SiteStatusChecker\PerformPingTestTool;
+use LLM\Agents\Agent\SiteStatusChecker\SiteStatusCheckerAgent;
+use LLM\Agents\Agent\SiteStatusChecker\SiteStatusCheckerAgentFactory;
+use LLM\Agents\Tool\ToolRegistryInterface;
+use Spiral\Boot\Bootloader\Bootloader;
+use Spiral\Boot\EnvironmentInterface;
+final class SiteStatusCheckerBootloader extends Bootloader
+{
+    public function boot(
+        AgentRegistryInterface $agents,
+        ToolRegistryInterface $tools,
+        SiteStatusCheckerAgentFactory $siteStatusCheckerAgentFactory,
+        EnvironmentInterface $env,
+    ): void {
+        $agents->register(
+            $siteStatusCheckerAgentFactory->create(
+                $env->get('SITE_STATUS_CHECKER_MODEL', SiteStatusCheckerAgent::DEFAULT_MODEL),
+            ),
+        );
+        $tools->register(
+            new CheckSiteAvailabilityTool(),
+            new GetDNSInfoTool(),
+            new PerformPingTestTool(),
+        );
+    }
+}
+//vendor/llm-agents/agent-site-status-checker/src
+namespace App\Agents\SiteStatusChecker;
+namespace LLM\Agents\Agent\SiteStatusChecker;
+/**
+ * @extends PhpTool<GetDNSInfoInput>
+ */
+final class GetDNSInfoTool extends PhpTool
+{
+    public const NAME = 'get_dns_info';
+    public function __construct()
+    {
+        parent::__construct(
+            name: self::NAME,
+            inputSchema: GetDNSInfoInput::class,
+            description: 'This tool retrieves DNS information for a given domain, including IP addresses and name servers.',
+        );
+    }
+    public function execute(object $input): string
+    {
+        // Implement the actual DNS info retrieval here
+        // This is a placeholder implementation
+        $dnsRecords = \dns_get_record($input->domain, DNS_A + DNS_NS);
+        $ipAddresses = \array_column(array_filter($dnsRecords, fn($record) => $record['type'] === 'A'), 'ip');
+        $nameServers = \array_column(array_filter($dnsRecords, fn($record) => $record['type'] === 'NS'), 'target');
+        return \json_encode([
+            'ip_addresses' => $ipAddresses,
+            'name_servers' => $nameServers,
+        ]);
+    }
+}
+//vendor/llm-agents/agent-site-status-checker/src
+namespace LLM\Agents\Agent\SiteStatusChecker;
+use Spiral\JsonSchemaGenerator\Attribute\Field;
+final readonly class CheckSiteAvailabilityInput
+{
+    public function __construct(
+        #[Field(title: 'URL', description: 'The full URL of the website to check')]
+        public string $url,
+    ) {}
+}
+//vendor/llm-agents/agent-symfony-console/src
+namespace LLM\Agents\Agent\SymfonyConsole;
+use LLM\Agents\Agent\AgentFactoryInterface;
+use LLM\Agents\Agent\AgentInterface;
+final readonly class SymfonyConsoleAgentFactory implements AgentFactoryInterface
+{
+    public function __construct(
+        private string $frameworkName,
+    ) {}
+    public function create(): AgentInterface
+    {
+        return SymfonyConsoleAgent::create(frameworkName: $this->frameworkName);
+    }
+}
+//vendor/llm-agents/agent-symfony-console/src
+namespace LLM\Agents\Agent\SymfonyConsole;
+use Spiral\JsonSchemaGenerator\Attribute\Field;
+final readonly class GetCommandDetailsInput
+{
+    public function __construct(
+        #[Field(title: 'Command', description: 'The name of the command to get details for')]
+        public string $command,
+    ) {}
+}
+//vendor/llm-agents/agent-symfony-console/src
+namespace LLM\Agents\Agent\SymfonyConsole;
+use LLM\Agents\Agent\AgentAggregate;
+use LLM\Agents\Agent\Agent;
+use LLM\Agents\Solution\Model;
+use LLM\Agents\Solution\ToolLink;
+use LLM\Agents\Solution\MetadataType;
+use LLM\Agents\Solution\SolutionMetadata;
+final class SymfonyConsoleAgent extends AgentAggregate
+{
+    public const NAME = 'symfony_console_agent';
+    public static function create(
+        string $frameworkName = 'Laravel',
+    ): self {
+        $agent = new Agent(
+            key: self::NAME,
+            name: 'Symfony Console Agent',
+            description: 'This agent is designed to interact with console commands.',
+            instruction: \sprintf(
+                <<<'PROMPT'
+You are an expert in %s framework.
+You are a console command executor.
+Your primary goal is to help users interact with console commands.
+PROMPT,
+                $frameworkName,
+            ),
+        );
+        $aggregate = new self($agent);
+        $aggregate->addMetadata(
+            new SolutionMetadata(
+                type: MetadataType::Memory,
+                key: 'console_agent',
+                content: \sprintf(
+                    <<<'PROMPT'
+This agent is designed to interact with console commands for %s framework.',
+PROMPT,
+                    $frameworkName,
+                ),
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Memory,
+                key: 'available_tools',
+                content: <<<'PROMPT'
+The Agent provides tools:
+- get_commands_list,
+- get_command_details,
+- execute_command,
+- read_file,
+- write_file.
+There is no other way to interact with the console commands.
+PROMPT,
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Memory,
+                key: 'command_details',
+                content: 'Always run `get_command_details` before the first command usage to understand what options and arguments are available.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Memory,
+                key: 'tools_usage',
+                content: 'Before start always run `get_commands_list` to understand commands purpose.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Memory,
+                key: 'your_goal',
+                content: 'A user provides a desired command to execute, and you should run it with the provided arguments and options.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Memory,
+                key: 'update_code',
+                content: 'Some commands may require additional code to be added to the project.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Memory,
+                key: 'steps',
+                content: <<<'PROMPT'
+Think step by step. Run commands one by one without additional approves.
+If you need to run multiple commands or tools, do it one by one.
+PROMPT,
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Memory,
+                key: 'only_available_tools',
+                content: 'Do not make up tools that are not available in the Agent. Use tool `execute_command` to run console commands.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Memory,
+                key: 'only_available_tools',
+                content: <<<'PROMPT'
+To create files always use console commands.
+Do not use `write_file` tool to create files, only for writing content to existing files.
+PROMPT,
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Memory,
+                key: 'answer',
+                content: 'Write only short summary answers. Do not provide long explanations and code snippets.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Configuration,
+                key: 'max_tokens',
+                content: 3_000,
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Prompt,
+                key: 'create_user_model',
+                content: 'Generate a Blog model with the following fields: title, content, and published_at.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Prompt,
+                key: 'create_auth_middleware',
+                content: 'Create a new middleware called AuthenticateAdmin to check if a user is an admin.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Prompt,
+                key: 'create_order_event',
+                content: 'Make an event class named OrderPlaced for when a new order is created.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Prompt,
+                key: 'create_api_resource',
+                content: 'Generate a new API resource for the Product model.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Prompt,
+                key: 'create_custom_validation',
+                content: 'Create a new validation rule called StrongPassword to ensure passwords meet specific criteria.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Prompt,
+                key: 'create_email_notification',
+                content: 'Make a new notification class for sending welcome emails to new users.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Prompt,
+                key: 'create_database_seeder',
+                content: 'Generate a seeder class to populate the categories table with initial data.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Prompt,
+                key: 'create_custom_artisan_command',
+                content: 'Create a new Artisan command called SendWeeklyNewsletter to automate newsletter distribution.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Prompt,
+                key: 'create_api_controller',
+                content: 'Make a new API controller for handling CRUD operations on the Post model.',
+            ),
+            new SolutionMetadata(
+                type: MetadataType::Prompt,
+                key: 'create_database_migration',
+                content: 'Generate a migration to add a `status` column to the orders table.',
+            ),
+        );
+        $aggregate->addAssociation(new Model(model: 'gpt-4o-mini'));
+        $aggregate->addAssociation(new ToolLink(name: GetCommandsListTool::NAME));
+        $aggregate->addAssociation(new ToolLink(name: GetCommandDetailsTool::NAME));
+        $aggregate->addAssociation(new ToolLink(name: ExecuteCommandTool::NAME));
+        $aggregate->addAssociation(new ToolLink(name: ReadFileTool::NAME));
+        $aggregate->addAssociation(new ToolLink(name: WriteFileTool::NAME));
+        return $aggregate;
+    }
+}
+//vendor/llm-agents/agent-symfony-console/src
+namespace LLM\Agents\Agent\SymfonyConsole;
+use Spiral\JsonSchemaGenerator\Attribute\Field;
+final readonly class Argument
+{
+    public function __construct(
+        #[Field(title: 'Key', description: 'The key of the argument')]
+        public string $key,
+        #[Field(title: 'Value', description: 'The value of the argument')]
+        public string $value,
+    ) {}
+}
+//vendor/llm-agents/agent-symfony-console/src
+namespace LLM\Agents\Agent\SymfonyConsole;
+use Spiral\JsonSchemaGenerator\Attribute\Field;
+final readonly class ExecuteCommandInput
+{
+    public function __construct(
+        #[Field(title: 'Command', description: 'The name of the command to execute')]
+        public string $command,
+        /** @var array<Argument> */
+        #[Field(title: 'Arguments', description: 'Command arguments')]
+        public array $arguments,
+        /** @var array<Option> */
+        #[Field(title: 'Options', description: 'Command options')]
+        public array $options,
+    ) {}
+}
+//vendor/llm-agents/agent-symfony-console/src
+namespace LLM\Agents\Agent\SymfonyConsole;
+use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Output\OutputInterface;
+interface CommandManagerInterface
+{
+    public function getCommandHelp(string $command): string;
+    /**
+     * @return array<non-empty-string, Command>
+     */
+    public function getCommands(): array;
+    /**
+     * Run a console command by name.
+     *
+     * @return int The command exit code
+     */
+    public function call(
+        string|\Stringable $command,
+        array $parameters = [],
+        ?OutputInterface $output = null,
+    ): int;
+}
+//vendor/llm-agents/agent-symfony-console/src
+namespace LLM\Agents\Agent\SymfonyConsole;
+use LLM\Agents\Tool\Tool;
+use LLM\Agents\Tool\ToolLanguage;
+use Symfony\Component\Console\Output\BufferedOutput;
+final class ExecuteCommandTool extends Tool
+{
+    public const NAME = 'execute_command';
+    public function __construct(
+        private readonly CommandManagerInterface $application,
+    ) {
+        parent::__construct(
+            name: self::NAME,
+            inputSchema: ExecuteCommandInput::class,
+            description: 'This tool executes a console command with the provided arguments and options.',
+        );
+    }
+    public function getLanguage(): ToolLanguage
+    {
+        return ToolLanguage::PHP;
+    }
+    public function execute(object $input): string
+    {
+        $arguments = [];
+        foreach ($input->arguments as $argument) {
+            $arguments[$argument->key] = $argument->value;
+        }
+        foreach ($input->options as $option) {
+            $value = $option->value;
+            if ($option->value === '') {
+                $value = true;
+            }
+            $arguments[$option->key][] = $value;
+        }
+        $output = new BufferedOutput();
+        try {
+            $exitCode = $this->application->call($input->command, $arguments, $output);
+            $result = [
+                'success' => $exitCode === 0,
+                'output' => $output->fetch(),
+                'exit_code' => $exitCode,
+            ];
+        } catch (\Exception $e) {
+            $result = [
+                'success' => false,
+                'error' => $e->getMessage(),
+            ];
+        }
+        return \json_encode($result);
+    }
+}
+//vendor/llm-agents/agent-symfony-console/src
+namespace LLM\Agents\Agent\SymfonyConsole;
+use Spiral\JsonSchemaGenerator\Attribute\Field;
+final readonly class WriteFileInput
+{
+    public function __construct(
+        #[Field(title: 'Path', description: 'The path to the file to be written')]
+        public string $path,
+        #[Field(title: 'Content', description: 'The content to be written to the file')]
+        public string $content,
+    ) {}
+}
+//vendor/llm-agents/agent-symfony-console/src
+namespace LLM\Agents\Agent\SymfonyConsole;
+use LLM\Agents\Tool\Tool;
+use LLM\Agents\Tool\ToolLanguage;
+final class GetCommandsListTool extends Tool
+{
+    public const NAME = 'get_commands_list';
+    public function __construct(
+        private readonly CommandManagerInterface $application,
+    ) {
+        parent::__construct(
+            name: self::NAME,
+            inputSchema: GetCommandsListInput::class,
+            description: 'Retrieves a list of available console commands with their descriptions.',
+        );
+    }
+    public function getLanguage(): ToolLanguage
+    {
+        return ToolLanguage::PHP;
+    }
+    public function execute(object $input): string
+    {
+        $commands = $this->application->getCommands();
+        $result = [];
+        foreach ($commands as $name => $command) {
+            $result[] = [
+                'name' => $name,
+                'description' => $command->getDescription(),
+            ];
+        }
+        return \json_encode($result);
+    }
+}
+//vendor/llm-agents/agent-symfony-console/src
+namespace LLM\Agents\Agent\SymfonyConsole;
+use Spiral\JsonSchemaGenerator\Attribute\Field;
+final readonly class ReadFileInput
+{
+    public function __construct(
+        #[Field(title: 'Path', description: 'The path to the file to be read')]
+        public string $path,
+    ) {}
+}
+//vendor/llm-agents/agent-symfony-console/src
+namespace LLM\Agents\Agent\SymfonyConsole;
+use LLM\Agents\Tool\Tool;
+use LLM\Agents\Tool\ToolLanguage;
+final class GetCommandDetailsTool extends Tool
+{
+    public const NAME = 'get_command_details';
+    public function __construct(
+        private readonly CommandManagerInterface $application,
+    ) {
+        parent::__construct(
+            name: self::NAME,
+            inputSchema: GetCommandDetailsInput::class,
+            description: 'Retrieves detailed information about a specific console command, including usage, arguments, and options.',
+        );
+    }
+    public function getLanguage(): ToolLanguage
+    {
+        return ToolLanguage::PHP;
+    }
+    public function execute(object $input): string
+    {
+        $details = $this->application->getCommandHelp($input->command);
+        return \json_encode([
+            'help' => $details,
+        ]);
+    }
+}
+//vendor/llm-agents/agent-symfony-console/src
+namespace LLM\Agents\Agent\SymfonyConsole;
+use Spiral\JsonSchemaGenerator\Attribute\Field;
+final readonly class GetCommandsListInput
+{
+    public function __construct(
+        #[Field(title: 'Namespace', description: 'Optional namespace to filter commands. Empty string to retrieve all commands')]
+        public string $namespace,
+    ) {}
+}
+//vendor/llm-agents/agent-symfony-console/src
+namespace LLM\Agents\Agent\SymfonyConsole;
+use LLM\Agents\Tool\Tool;
+use LLM\Agents\Tool\ToolLanguage;
+final class WriteFileTool extends Tool
+{
+    public const NAME = 'write_file';
+    public function __construct(
+        private readonly string $basePath,
+    ) {
+        parent::__construct(
+            name: self::NAME,
+            inputSchema: WriteFileInput::class,
+            description: 'This tool writes content to a file at the given path.',
+        );
+    }
+    public function getLanguage(): ToolLanguage
+    {
+        return ToolLanguage::PHP;
+    }
+    public function execute(object $input): string
+    {
+        $path = \rtrim($this->basePath, '/') . '/' . \ltrim($input->path, '/');
+        // Strip doubled slashes in code namespaces
+        $content = \preg_replace('/\\\\{2,}/', '\\', $input->content);
+        $result = \file_put_contents($path, $content);
+        if ($result === false) {
+            return \json_encode(['error' => 'Unable to write to file']);
+        }
+        return \json_encode([
+            'success' => true,
+            'bytes_written' => $result,
+            'path' => $input->path,
+        ]);
+    }
+}
+//vendor/llm-agents/agent-symfony-console/src/Integrations/Laravel
+namespace LLM\Agents\Agent\SymfonyConsole\Integrations\Laravel;
+use Illuminate\Contracts\Console\Kernel;
+use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Support\ServiceProvider;
+use LLM\Agents\Agent\AgentRegistryInterface;
+use LLM\Agents\Agent\SymfonyConsole\CommandManagerInterface;
+use LLM\Agents\Agent\SymfonyConsole\ExecuteCommandTool;
+use LLM\Agents\Agent\SymfonyConsole\GetCommandDetailsTool;
+use LLM\Agents\Agent\SymfonyConsole\GetCommandsListTool;
+use LLM\Agents\Agent\SymfonyConsole\ReadFileTool;
+use LLM\Agents\Agent\SymfonyConsole\SymfonyConsoleAgentFactory;
+use LLM\Agents\Agent\SymfonyConsole\WriteFileTool;
+use LLM\Agents\Tool\ToolRegistryInterface;
+final class SymfonyConsoleServiceProvider extends ServiceProvider
+{
+    public function register(): void
+    {
+        $this->app->singleton(
+            SymfonyConsoleAgentFactory::class,
+            static fn() => new SymfonyConsoleAgentFactory('Laravel'),
+        );
+        $this->app->singleton(
+            CommandManagerInterface::class,
+            static fn(Application $app) => new ArtisanCommandManager($app->get(Kernel::class)),
+        );
+        $this->app->singleton(
+            ExecuteCommandTool::class,
+            static fn(Application $app) => new ExecuteCommandTool($app->get(CommandManagerInterface::class)),
+        );
+        $this->app->singleton(
+            GetCommandDetailsTool::class,
+            static fn(Application $app) => new GetCommandDetailsTool($app->get(CommandManagerInterface::class)),
+        );
+        $this->app->singleton(
+            GetCommandsListTool::class,
+            static fn(Application $app) => new GetCommandsListTool($app->get(CommandManagerInterface::class)),
+        );
+        $this->app->singleton(
+            ReadFileTool::class,
+            static fn(Application $app) => new ReadFileTool($app->basePath()),
+        );
+        $this->app->singleton(
+            WriteFileTool::class,
+            static fn(Application $app) => new WriteFileTool($app->basePath()),
+        );
+    }
+    public function boot(
+        AgentRegistryInterface $agents,
+        ToolRegistryInterface $tools,
+        SymfonyConsoleAgentFactory $agentFactory,
+        CommandManagerInterface $commandManager,
+        Application $app,
+    ): void {
+        $agents->register(
+            $agentFactory->create(),
+        );
+        $tools->register(
+            new ExecuteCommandTool($commandManager),
+            new GetCommandDetailsTool($commandManager),
+            new GetCommandsListTool($commandManager),
+            new ReadFileTool($app->basePath()),
+            new WriteFileTool($app->basePath()),
+        );
+    }
+}
+//vendor/llm-agents/agent-symfony-console/src/Integrations/Laravel
+namespace LLM\Agents\Agent\SymfonyConsole\Integrations\Laravel;
+use Illuminate\Contracts\Console\Kernel;
+use LLM\Agents\Agent\SymfonyConsole\CommandManagerInterface;
+use Symfony\Component\Console\Output\BufferedOutput;
+use Symfony\Component\Console\Output\OutputInterface;
+final readonly class ArtisanCommandManager implements CommandManagerInterface
+{
+    public function __construct(
+        private Kernel $application,
+        private array $enabledNamespaces = [
+            'make:',
+            'db:',
+            'migrate',
+            'route:list',
+        ],
+    ) {}
+    public function getCommandHelp(string $command): string
+    {
+        $output = new BufferedOutput();
+        $this->application->call($command, ['--help' => true], $output);
+        return $output->fetch();
+    }
+    public function getCommands(): array
+    {
+        $commands = $this->application->all();
+        $availableCommands = [];
+        foreach ($this->enabledNamespaces as $namespace) {
+            foreach ($commands as $name => $command) {
+                if (\str_starts_with($name, $namespace)) {
+                    $availableCommands[$name] = $command;
+                }
+            }
+        }
+        return $availableCommands;
+    }
+    public function call(\Stringable|string $command, array $parameters = [], ?OutputInterface $output = null): int
+    {
+        return $this->application->call($command, $parameters, $output);
+    }
+}
+//vendor/llm-agents/agent-symfony-console/src/Integrations/Spiral
+namespace LLM\Agents\Agent\SymfonyConsole\Integrations\Spiral;
+use LLM\Agents\Agent\SymfonyConsole\CommandManagerInterface;
+use Psr\Container\ContainerInterface;
+use Spiral\Console\Console;
+use Symfony\Component\Console\Output\BufferedOutput;
+use Symfony\Component\Console\Output\OutputInterface;
+final readonly class CommandManager implements CommandManagerInterface
+{
+    public function __construct(
+        private ContainerInterface $app,
+        private array $enabledNamespaces = [
+            'create:',
+            'cycle:',
+            'migrate',
+            'route:list',
+        ],
+    ) {}
+    private function getConsole(): Console
+    {
+        return $this->app->get(Console::class);
+    }
+    public function getCommandHelp(string $command): string
+    {
+        $output = new BufferedOutput();
+        $this->call($command, ['--help' => true], $output);
+        return $output->fetch();
+    }
+    public function getCommands(): array
+    {
+        $commands = $this->getConsole()->getApplication()->all();
+        $availableCommands = [];
+        foreach ($this->enabledNamespaces as $namespace) {
+            foreach ($commands as $name => $command) {
+                if (\str_starts_with($name, $namespace)) {
+                    $availableCommands[$name] = $command;
+                }
+            }
+        }
+        return $availableCommands;
+    }
+    public function call(\Stringable|string $command, array $parameters = [], ?OutputInterface $output = null): int
+    {
+        return $this->getConsole()->run((string) $command, $parameters, $output)->getCode();
+    }
+}
+//vendor/llm-agents/agent-symfony-console/src/Integrations/Spiral
+namespace LLM\Agents\Agent\SymfonyConsole\Integrations\Spiral;
+use LLM\Agents\Agent\AgentRegistryInterface;
+use LLM\Agents\Agent\SymfonyConsole\CommandManagerInterface;
+use LLM\Agents\Agent\SymfonyConsole\ExecuteCommandTool;
+use LLM\Agents\Agent\SymfonyConsole\GetCommandDetailsTool;
+use LLM\Agents\Agent\SymfonyConsole\GetCommandsListTool;
+use LLM\Agents\Agent\SymfonyConsole\ReadFileTool;
+use LLM\Agents\Agent\SymfonyConsole\SymfonyConsoleAgentFactory;
+use LLM\Agents\Agent\SymfonyConsole\WriteFileTool;
+use LLM\Agents\Tool\ToolRegistryInterface;
+use Spiral\Boot\Bootloader\Bootloader;
+use Spiral\Boot\DirectoriesInterface;
+final class SymfonyConsoleBootloader extends Bootloader
+{
+    public function defineSingletons(): array
+    {
+        return [
+            SymfonyConsoleAgentFactory::class => static fn() => new SymfonyConsoleAgentFactory('Spiral'),
+            CommandManagerInterface::class => CommandManager::class,
+        ];
+    }
+    public function boot(
+        AgentRegistryInterface $agents,
+        ToolRegistryInterface $tools,
+        SymfonyConsoleAgentFactory $agentFactory,
+        CommandManagerInterface $commandManager,
+        DirectoriesInterface $dirs,
+    ): void {
+        $agents->register(
+            $agentFactory->create(),
+        );
+        $tools->register(
+            new ExecuteCommandTool($commandManager),
+            new GetCommandDetailsTool($commandManager),
+            new GetCommandsListTool($commandManager),
+            new ReadFileTool($dirs->get('root')),
+            new WriteFileTool($dirs->get('root')),
+        );
+    }
+}
+//vendor/llm-agents/agent-symfony-console/src
+namespace LLM\Agents\Agent\SymfonyConsole;
+use Spiral\JsonSchemaGenerator\Attribute\Field;
+final readonly class Option
+{
+    public function __construct(
+        #[Field(title: 'Key', description: 'The key of the option')]
+        public string $key,
+        #[Field(title: 'Value', description: 'The value of the option')]
+        public string $value,
+    ) {}
+}
+//vendor/llm-agents/agent-symfony-console/src
+namespace LLM\Agents\Agent\SymfonyConsole;
+use LLM\Agents\Tool\Tool;
+use LLM\Agents\Tool\ToolLanguage;
+final class ReadFileTool extends Tool
+{
+    public const NAME = 'read_file';
+    public function __construct(
+        private readonly string $basePath,
+    ) {
+        parent::__construct(
+            name: self::NAME,
+            inputSchema: ReadFileInput::class,
+            description: 'This tool reads the content of a file at the given path.',
+        );
+    }
+    public function getLanguage(): ToolLanguage
+    {
+        return ToolLanguage::PHP;
+    }
+    public function execute(object $input): string
+    {
+        $path = \rtrim($this->basePath, '/') . '/' . \ltrim($input->path, '/');
+        if (!file_exists($path)) {
+            return \json_encode(['error' => 'File not found']);
+        }
+        $content = \file_get_contents($path);
+        if ($content === false) {
+            return \json_encode(['error' => 'Unable to read file']);
+        }
+        return \json_encode([
+            'content' => $content,
+            'path' => $input->path,
+        ]);
     }
 }

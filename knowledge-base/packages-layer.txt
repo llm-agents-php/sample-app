@@ -1,0 +1,1165 @@
+This is an abstraction layer for the LLM Agents. It can be used as a template for creating new agents.
+//vendor/llm-agents/prompt-generator/src
+namespace LLM\Agents\PromptGenerator;
+use LLM\Agents\LLM\AgentPromptGeneratorInterface;
+interface PromptGeneratorPipelineInterface extends AgentPromptGeneratorInterface
+{
+    public function withInterceptor(PromptInterceptorInterface ...$interceptor): self;
+}
+//vendor/llm-agents/prompt-generator/src
+namespace LLM\Agents\PromptGenerator;
+use LLM\Agents\LLM\Prompt\Chat\PromptInterface;
+interface PromptInterceptorInterface
+{
+    public function generate(
+        PromptGeneratorInput $input,
+        InterceptorHandler $next,
+    ): PromptInterface;
+}
+//vendor/llm-agents/prompt-generator/src/Integration/Laravel
+namespace LLM\Agents\PromptGenerator\Integration\Laravel;
+use Illuminate\Support\ServiceProvider;
+use LLM\Agents\LLM\AgentPromptGeneratorInterface;
+use LLM\Agents\PromptGenerator\PromptGeneratorPipeline;
+use LLM\Agents\PromptGenerator\PromptGeneratorPipelineInterface;
+final class PromptGeneratorServiceProvider extends ServiceProvider
+{
+    public function register(): void
+    {
+        $this->app->singleton(PromptGeneratorPipeline::class, PromptGeneratorPipeline::class);
+        $this->app->singleton(PromptGeneratorPipelineInterface::class, PromptGeneratorPipeline::class);
+        $this->app->singleton(AgentPromptGeneratorInterface::class, PromptGeneratorPipeline::class);
+    }
+}
+//vendor/llm-agents/prompt-generator/src/Integration/Spiral
+namespace LLM\Agents\PromptGenerator\Integration\Spiral;
+use LLM\Agents\LLM\AgentPromptGeneratorInterface;
+use LLM\Agents\PromptGenerator\PromptGeneratorPipeline;
+use LLM\Agents\PromptGenerator\PromptGeneratorPipelineInterface;
+use Spiral\Boot\Bootloader\Bootloader;
+final class PromptGeneratorBootloader extends Bootloader
+{
+    public function defineSingletons(): array
+    {
+        return [
+            PromptGeneratorPipeline::class => PromptGeneratorPipeline::class,
+            PromptGeneratorPipelineInterface::class => PromptGeneratorPipeline::class,
+            AgentPromptGeneratorInterface::class => PromptGeneratorPipeline::class,
+        ];
+    }
+}
+//vendor/llm-agents/prompt-generator/src
+namespace LLM\Agents\PromptGenerator;
+use LLM\Agents\LLM\AgentPromptGeneratorInterface;
+use LLM\Agents\LLM\Prompt\Chat\PromptInterface;
+final readonly class InterceptorHandler
+{
+    public function __construct(
+        private AgentPromptGeneratorInterface $generator,
+    ) {}
+    public function __invoke(PromptGeneratorInput $input): PromptInterface
+    {
+        return $this->generator->generate(
+            agent: $input->agent,
+            userPrompt: $input->userPrompt,
+            context: $input->context,
+            prompt: $input->prompt,
+        );
+    }
+}
+//vendor/llm-agents/prompt-generator/src
+namespace LLM\Agents\PromptGenerator;
+use LLM\Agents\Agent\AgentInterface;
+use LLM\Agents\LLM\Prompt\Chat\PromptInterface;
+use LLM\Agents\LLM\PromptContextInterface;
+final readonly class PromptGeneratorInput
+{
+    public function __construct(
+        public AgentInterface $agent,
+        public string|\Stringable $userPrompt,
+        public PromptInterface $prompt,
+        public PromptContextInterface $context,
+    ) {}
+    public function withAgent(AgentInterface $agent): self
+    {
+        return new self(
+            $agent,
+            $this->userPrompt,
+            $this->prompt,
+            $this->context,
+        );
+    }
+    public function withUserPrompt(string|\Stringable $userPrompt): self
+    {
+        return new self(
+            $this->agent,
+            $userPrompt,
+            $this->prompt,
+            $this->context,
+        );
+    }
+    public function withContext(PromptContextInterface $context): self
+    {
+        return new self(
+            $this->agent,
+            $this->userPrompt,
+            $this->prompt,
+            $context,
+        );
+    }
+    public function withPrompt(PromptInterface $prompt): self
+    {
+        return new self(
+            $this->agent,
+            $this->userPrompt,
+            $prompt,
+            $this->context,
+        );
+    }
+}
+//vendor/llm-agents/prompt-generator/src
+namespace LLM\Agents\PromptGenerator;
+use LLM\Agents\Agent\AgentInterface;
+use LLM\Agents\LLM\Prompt\Chat\Prompt;
+use LLM\Agents\LLM\Prompt\Chat\PromptInterface;
+use LLM\Agents\LLM\PromptContextInterface;
+final class PromptGeneratorPipeline implements PromptGeneratorPipelineInterface
+{
+    /** @var PromptInterceptorInterface[] */
+    private array $interceptors = [];
+    private int $offset = 0;
+    public function generate(
+        AgentInterface $agent,
+        string|\Stringable $userPrompt,
+        PromptContextInterface $context,
+        PromptInterface $prompt = new Prompt(),
+    ): PromptInterface {
+        if (!isset($this->interceptors[$this->offset])) {
+            return $prompt;
+        }
+        return $this->interceptors[$this->offset]->generate(
+            input: new PromptGeneratorInput(
+                agent: $agent,
+                userPrompt: $userPrompt,
+                prompt: $prompt,
+                context: $context,
+            ),
+            next: new InterceptorHandler(generator: $this->next()),
+        );
+    }
+    public function withInterceptor(PromptInterceptorInterface ...$interceptor): self
+    {
+        $pipeline = clone $this;
+        $pipeline->interceptors = \array_merge($this->interceptors, $interceptor);
+        return $pipeline;
+    }
+    private function next(): self
+    {
+        $pipeline = clone $this;
+        $pipeline->offset++;
+        return $pipeline;
+    }
+}
+//vendor/llm-agents/prompt-generator/src/Interceptors
+namespace LLM\Agents\PromptGenerator\Interceptors;
+use LLM\Agents\LLM\Prompt\Chat\MessagePrompt;
+use LLM\Agents\LLM\Prompt\Chat\Prompt;
+use LLM\Agents\LLM\Prompt\Chat\PromptInterface;
+use LLM\Agents\PromptGenerator\InterceptorHandler;
+use LLM\Agents\PromptGenerator\PromptGeneratorInput;
+use LLM\Agents\PromptGenerator\PromptInterceptorInterface;
+use LLM\Agents\Solution\SolutionMetadata;
+final class AgentMemoryInjector implements PromptInterceptorInterface
+{
+    public function generate(
+        PromptGeneratorInput $input,
+        InterceptorHandler $next,
+    ): PromptInterface {
+        \assert($input->prompt instanceof Prompt);
+        return $next(
+            input: $input->withPrompt(
+                $input->prompt
+                    ->withAddedMessage(
+                        MessagePrompt::system(
+                            prompt: 'Instructions about your experiences, follow them: {memory}. And also {dynamic_memory}',
+                        ),
+                    )
+                    ->withValues(
+                        values: [
+                            'memory' => \implode(
+                                PHP_EOL,
+                                \array_map(
+                                    static fn(SolutionMetadata $metadata) => $metadata->content,
+                                    $input->agent->getMemory(),
+                                ),
+                            ),
+                            'dynamic_memory' => '',
+                        ],
+                    ),
+            ),
+        );
+    }
+}
+//vendor/llm-agents/prompt-generator/src/Interceptors
+namespace LLM\Agents\PromptGenerator\Interceptors;
+use LLM\Agents\LLM\Prompt\Chat\ChatMessage;
+use LLM\Agents\LLM\Prompt\Chat\Prompt;
+use LLM\Agents\LLM\Prompt\Chat\PromptInterface;
+use LLM\Agents\LLM\Prompt\Chat\Role;
+use LLM\Agents\PromptGenerator\InterceptorHandler;
+use LLM\Agents\PromptGenerator\PromptGeneratorInput;
+use LLM\Agents\PromptGenerator\PromptInterceptorInterface;
+final class UserPromptInjector implements PromptInterceptorInterface
+{
+    public function generate(
+        PromptGeneratorInput $input,
+        InterceptorHandler $next,
+    ): PromptInterface {
+        \assert($input->prompt instanceof Prompt);
+        return $next(
+            input: $input->withPrompt(
+                $input->prompt->withAddedMessage(
+                    new ChatMessage(
+                        content: (string) $input->userPrompt,
+                        role: Role::User,
+                    ),
+                ),
+            ),
+        );
+    }
+}
+//vendor/llm-agents/prompt-generator/src/Interceptors
+namespace LLM\Agents\PromptGenerator\Interceptors;
+use LLM\Agents\Agent\AgentRepositoryInterface;
+use LLM\Agents\Agent\HasLinkedAgentsInterface;
+use LLM\Agents\LLM\Prompt\Chat\MessagePrompt;
+use LLM\Agents\LLM\Prompt\Chat\Prompt;
+use LLM\Agents\LLM\Prompt\Chat\PromptInterface;
+use LLM\Agents\PromptGenerator\InterceptorHandler;
+use LLM\Agents\PromptGenerator\PromptGeneratorInput;
+use LLM\Agents\PromptGenerator\PromptInterceptorInterface;
+use LLM\Agents\Solution\AgentLink;
+use LLM\Agents\Tool\SchemaMapperInterface;
+final readonly class LinkedAgentsInjector implements PromptInterceptorInterface
+{
+    public function __construct(
+        private AgentRepositoryInterface $agents,
+        private SchemaMapperInterface $schemaMapper,
+    ) {}
+    public function generate(
+        PromptGeneratorInput $input,
+        InterceptorHandler $next,
+    ): PromptInterface {
+        \assert($input->prompt instanceof Prompt);
+        if (!$input->agent instanceof HasLinkedAgentsInterface) {
+            return $next($input);
+        }
+        if (\count($input->agent->getAgents()) === 0) {
+            return $next($input);
+        }
+        $associatedAgents = \array_map(
+            fn(AgentLink $agent): array => [
+                'agent' => $this->agents->get($agent->getName()),
+                'output_schema' => \json_encode($this->schemaMapper->toJsonSchema($agent->outputSchema)),
+            ],
+            $input->agent->getAgents(),
+        );
+        return $next(
+            input: $input->withPrompt(
+                $input
+                    ->prompt
+                    ->withAddedMessage(
+                        MessagePrompt::system(
+                            prompt: <<<'PROMPT'
+There are agents {linked_agents} associated with you. You can ask them for help if you need it.
+Use the `ask_agent` tool and provide the agent key.
+Always follow rules:
+- Don't make up the agent key. Use only the ones from the provided list.
+PROMPT,
+                        ),
+                    )
+                    ->withValues(
+                        values: [
+                            'linked_agents' => \implode(
+                                PHP_EOL,
+                                \array_map(
+                                    static fn(array $agent): string => \json_encode([
+                                        'key' => $agent['agent']->getKey(),
+                                        'description' => $agent['agent']->getDescription(),
+                                        'output_schema' => $agent['output_schema'],
+                                    ]),
+                                    $associatedAgents,
+                                ),
+                            ),
+                        ],
+                    ),
+            ),
+        );
+    }
+}
+//vendor/llm-agents/prompt-generator/src/Interceptors
+namespace LLM\Agents\PromptGenerator\Interceptors;
+use LLM\Agents\LLM\Prompt\Chat\MessagePrompt;
+use LLM\Agents\LLM\Prompt\Chat\Prompt;
+use LLM\Agents\LLM\Prompt\Chat\PromptInterface;
+use LLM\Agents\PromptGenerator\InterceptorHandler;
+use LLM\Agents\PromptGenerator\PromptGeneratorInput;
+use LLM\Agents\PromptGenerator\PromptInterceptorInterface;
+final class InstructionGenerator implements PromptInterceptorInterface
+{
+    public function generate(
+        PromptGeneratorInput $input,
+        InterceptorHandler $next,
+    ): PromptInterface {
+        \assert($input->prompt instanceof Prompt);
+        return $next(
+            input: $input->withPrompt(
+                $input->prompt
+                    ->withAddedMessage(
+                        MessagePrompt::system(
+                            prompt: <<<'PROMPT'
+{prompt}
+Important rules:
+- always response in markdown format
+- think before responding to user
+PROMPT,
+                        ),
+                    )
+                    ->withValues(
+                        values: [
+                            'prompt' => $input->agent->getInstruction(),
+                        ],
+                    ),
+            ),
+        );
+    }
+}
+//vendor/llm-agents/prompt-generator/src
+namespace LLM\Agents\PromptGenerator;
+use LLM\Agents\LLM\PromptContextInterface;
+class Context implements PromptContextInterface
+{
+    private array|\JsonSerializable|null $authContext = null;
+    final public static function new(): self
+    {
+        return new self();
+    }
+    public function setAuthContext(array|\JsonSerializable $authContext): self
+    {
+        $this->authContext = $authContext;
+        return $this;
+    }
+    public function getAuthContext(): array|\JsonSerializable|null
+    {
+        return $this->authContext;
+    }
+}
+//vendor/llm-agents/openai-client/src
+namespace LLM\Agents\OpenAI\Client;
+use LLM\Agents\LLM\Prompt\Chat\ChatMessage;
+use LLM\Agents\LLM\Prompt\Chat\Role;
+use LLM\Agents\LLM\Prompt\Chat\ToolCalledPrompt;
+use LLM\Agents\LLM\Prompt\Chat\ToolCallResultMessage;
+use LLM\Agents\LLM\Prompt\Tool;
+use LLM\Agents\LLM\Response\ToolCall;
+final readonly class MessageMapper
+{
+    public function map(object $message): array
+    {
+        if ($message instanceof ChatMessage) {
+            return [
+                'content' => $message->content,
+                'role' => $message->role->value,
+            ];
+        }
+        if ($message instanceof ToolCallResultMessage) {
+            return [
+                'content' => \is_array($message->content) ? \json_encode($message->content) : $message->content,
+                'tool_call_id' => $message->id,
+                'role' => $message->role->value,
+            ];
+        }
+        if ($message instanceof ToolCalledPrompt) {
+            return [
+                'content' => null,
+                'role' => Role::Assistant->value,
+                'tool_calls' => \array_map(
+                    static fn(ToolCall $tool): array => [
+                        'id' => $tool->id,
+                        'type' => 'function',
+                        'function' => [
+                            'name' => $tool->name,
+                            'arguments' => $tool->arguments,
+                        ],
+                    ],
+                    $message->tools,
+                ),
+            ];
+        }
+        if ($message instanceof Tool) {
+            return [
+                'type' => 'function',
+                'function' => [
+                    'name' => $message->name,
+                    'description' => $message->description,
+                    'parameters' => [
+                            'type' => 'object',
+                            'additionalProperties' => $message->additionalProperties,
+                        ] + $message->parameters,
+                    'strict' => $message->strict,
+                ],
+            ];
+        }
+        if ($message instanceof \JsonSerializable) {
+            return $message->jsonSerialize();
+        }
+        throw new \InvalidArgumentException('Invalid message type');
+    }
+}
+//vendor/llm-agents/openai-client/src/Integration/Laravel
+namespace LLM\Agents\OpenAI\Client\Integration\Laravel;
+use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Support\ServiceProvider;
+use LLM\Agents\Embeddings\EmbeddingGeneratorInterface;
+use LLM\Agents\LLM\LLMInterface;
+use LLM\Agents\OpenAI\Client\Embeddings\EmbeddingGenerator;
+use LLM\Agents\OpenAI\Client\Embeddings\OpenAIEmbeddingModel;
+use LLM\Agents\OpenAI\Client\LLM;
+use LLM\Agents\OpenAI\Client\Parsers\ChatResponseParser;
+use LLM\Agents\OpenAI\Client\StreamResponseParser;
+use OpenAI\Contracts\ClientContract;
+use OpenAI\Responses\Chat\CreateStreamedResponse;
+final class OpenAIClientServiceProvider extends ServiceProvider
+{
+    public function register(): void
+    {
+        $this->app->singleton(
+            LLMInterface::class,
+            LLM::class,
+        );
+        $this->app->singleton(
+            EmbeddingGeneratorInterface::class,
+            EmbeddingGenerator::class,
+        );
+        $this->app->singleton(
+            EmbeddingGenerator::class,
+            static function (
+                ClientContract $client,
+            ): EmbeddingGenerator {
+                return new EmbeddingGenerator(
+                    client: $client,
+                    // todo: use config
+                    model: OpenAIEmbeddingModel::TextEmbeddingAda002,
+                );
+            },
+        );
+        $this->app->singleton(
+            StreamResponseParser::class,
+            static function (Application $app): StreamResponseParser {
+                $parser = new StreamResponseParser();
+                // Register parsers here
+                $parser->registerParser(
+                    CreateStreamedResponse::class,
+                    $app->make(ChatResponseParser::class),
+                );
+                return $parser;
+            },
+        );
+    }
+}
+//vendor/llm-agents/openai-client/src/Integration/Spiral
+namespace LLM\Agents\OpenAI\Client\Integration\Spiral;
+use GuzzleHttp\Client as HttpClient;
+use LLM\Agents\Embeddings\EmbeddingGeneratorInterface;
+use LLM\Agents\LLM\LLMInterface;
+use LLM\Agents\OpenAI\Client\Embeddings\EmbeddingGenerator;
+use LLM\Agents\OpenAI\Client\Embeddings\OpenAIEmbeddingModel;
+use LLM\Agents\OpenAI\Client\LLM;
+use LLM\Agents\OpenAI\Client\Parsers\ChatResponseParser;
+use LLM\Agents\OpenAI\Client\StreamResponseParser;
+use OpenAI\Contracts\ClientContract;
+use OpenAI\Responses\Chat\CreateStreamedResponse;
+use Spiral\Boot\Bootloader\Bootloader;
+use Spiral\Boot\EnvironmentInterface;
+final class OpenAIClientBootloader extends Bootloader
+{
+    public function defineSingletons(): array
+    {
+        return [
+            LLMInterface::class => LLM::class,
+            EmbeddingGeneratorInterface::class => EmbeddingGenerator::class,
+            EmbeddingGenerator::class => static function (
+                ClientContract $client,
+                EnvironmentInterface $env,
+            ): EmbeddingGenerator {
+                return new EmbeddingGenerator(
+                    client: $client,
+                    model: OpenAIEmbeddingModel::from(
+                        $env->get('OPENAI_EMBEDDING_MODEL', OpenAIEmbeddingModel::TextEmbedding3Small->value),
+                    ),
+                );
+            },
+            ClientContract::class => static fn(
+                EnvironmentInterface $env,
+            ): ClientContract => \OpenAI::factory()
+                ->withApiKey($env->get('OPENAI_KEY'))
+                ->withHttpHeader('OpenAI-Beta', 'assistants=v1')
+                ->withHttpClient(
+                    new HttpClient([
+                        'timeout' => (int) $env->get('OPENAI_HTTP_CLIENT_TIMEOUT', 2 * 60),
+                    ]),
+                )
+                ->make(),
+            StreamResponseParser::class => static function (
+                ChatResponseParser $chatResponseParser,
+            ): StreamResponseParser {
+                $parser = new StreamResponseParser();
+                // Register parsers here
+                $parser->registerParser(CreateStreamedResponse::class, $chatResponseParser);
+                return $parser;
+            },
+        ];
+    }
+}
+//vendor/llm-agents/openai-client/src/Embeddings
+namespace LLM\Agents\OpenAI\Client\Embeddings;
+use LLM\Agents\Embeddings\Document;
+use LLM\Agents\Embeddings\Embedding;
+use LLM\Agents\Embeddings\EmbeddingGeneratorInterface;
+use OpenAI\Contracts\ClientContract;
+final readonly class EmbeddingGenerator implements EmbeddingGeneratorInterface
+{
+    public function __construct(
+        private ClientContract $client,
+        private OpenAIEmbeddingModel $model = OpenAIEmbeddingModel::TextEmbeddingAda002,
+    ) {}
+    public function generate(Document ...$documents): array
+    {
+        $documents = \array_values($documents);
+        $response = $this->client->embeddings()->create([
+            'model' => $this->model->value,
+            'input' => \array_map(static fn(Document $doc): string => $doc->content, $documents),
+        ]);
+        foreach ($response->embeddings as $i => $embedding) {
+            $documents[$i] = $documents[$i]->withEmbedding(new Embedding($embedding->embedding));
+        }
+        return $documents;
+    }
+}
+//vendor/llm-agents/openai-client/src/Embeddings
+namespace LLM\Agents\OpenAI\Client\Embeddings;
+enum OpenAIEmbeddingModel: string
+{
+    case TextEmbedding3Small = 'text-embedding-3-small';
+    case TextEmbedding3Large = 'text-embedding-3-large';
+    case TextEmbeddingAda002 = 'text-embedding-ada-002';
+}
+//vendor/llm-agents/openai-client/src
+namespace LLM\Agents\OpenAI\Client;
+use LLM\Agents\LLM\ContextFactoryInterface;
+use LLM\Agents\LLM\ContextInterface;
+final class ContextFactory implements ContextFactoryInterface
+{
+    public function create(): ContextInterface
+    {
+        return new Context();
+    }
+}
+//vendor/llm-agents/openai-client/src
+namespace LLM\Agents\OpenAI\Client;
+use LLM\Agents\LLM\OptionsFactoryInterface;
+use LLM\Agents\LLM\OptionsInterface;
+final class OptionsFactory implements OptionsFactoryInterface
+{
+    public function create(array $options = []): OptionsInterface
+    {
+        return new Options($options);
+    }
+}
+//vendor/llm-agents/openai-client/src
+namespace LLM\Agents\OpenAI\Client;
+enum OpenAIModel: string
+{
+    case Gpt4o = 'gpt-4o';
+    case Gpt4oLatest = 'chatgpt-4o-latest';
+    case Gpt4o20240513 = 'gpt-4o-2024-05-13';
+    case Gpt4o20240806 = 'gpt-4o-2024-08-06';
+    case Gpt4oMini = 'gpt-4o-mini';
+    case Gpt4oMini20240718 = 'gpt-4o-mini-2024-07-18';
+    case Gpt4Turbo = 'gpt-4-turbo';
+    case Gpt4TurboPreview = 'gpt-4-turbo-preview';
+    case Gpt4 = 'gpt-4';
+    case Gpt40613 = 'gpt-4-0613';
+    case Gpt3Turbo = 'gpt-3.5-turbo';
+    case Gpt3Turbo1106 = 'gpt-3.5-turbo-1106';
+    case Gpt3TurboInstruct = 'gpt-3.5-turbo-instruct';
+}
+//vendor/llm-agents/openai-client/src
+namespace LLM\Agents\OpenAI\Client;
+use LLM\Agents\LLM\ContextInterface;
+use LLM\Agents\LLM\LLMInterface;
+use LLM\Agents\LLM\OptionsInterface;
+use LLM\Agents\LLM\Prompt\Chat\MessagePrompt;
+use LLM\Agents\LLM\Prompt\Chat\PromptInterface as ChatPromptInterface;
+use LLM\Agents\LLM\Prompt\PromptInterface;
+use LLM\Agents\LLM\Prompt\Tool;
+use LLM\Agents\LLM\Response\Response;
+use LLM\Agents\OpenAI\Client\Exception\LimitExceededException;
+use LLM\Agents\OpenAI\Client\Exception\RateLimitException;
+use LLM\Agents\OpenAI\Client\Exception\TimeoutException;
+use OpenAI\Contracts\ClientContract;
+final class LLM implements LLMInterface
+{
+    private array $defaultOptions = [
+        Option::Temperature->value => 0.8,
+        Option::MaxTokens->value => 120,
+        Option::TopP->value => null,
+        Option::FrequencyPenalty->value => null,
+        Option::PresencePenalty->value => null,
+        Option::Stop->value => null,
+        Option::LogitBias->value => null,
+        Option::FunctionCall->value => null,
+        Option::Functions->value => null,
+        Option::User->value => null,
+        Option::Model->value => OpenAIModel::Gpt4oMini->value,
+    ];
+    public function __construct(
+        private readonly ClientContract $client,
+        private readonly MessageMapper $messageMapper,
+        protected readonly StreamResponseParser $streamParser,
+    ) {}
+    public function generate(
+        ContextInterface $context,
+        PromptInterface $prompt,
+        OptionsInterface $options,
+    ): Response {
+        \assert($options instanceof Options);
+        $request = $this->buildOptions($options);
+        if ($prompt instanceof ChatPromptInterface) {
+            $messages = $prompt->format();
+        } else {
+            $messages = [
+                MessagePrompt::user($prompt)->toChatMessage(),
+            ];
+        }
+        foreach ($messages as $message) {
+            $request['messages'][] = $this->messageMapper->map($message);
+        }
+        if ($options->has(Option::Tools)) {
+            $request['tools'] = \array_values(
+                \array_map(
+                    fn(Tool $tool): array => $this->messageMapper->map($tool),
+                    $options->get(Option::Tools),
+                ),
+            );
+        }
+        $callback = null;
+        if ($options->has(Option::StreamChunkCallback)) {
+            $callback = $options->get(Option::StreamChunkCallback);
+            \assert($callback instanceof StreamChunkCallbackInterface);
+        }
+        $stream = $this
+            ->client
+            ->chat()
+            ->createStreamed($request);
+        try {
+            return $this->streamParser->parse($stream, $callback);
+        } catch (LimitExceededException) {
+            throw new \LLM\Agents\LLM\Exception\LimitExceededException(
+                currentLimit: $request['max_tokens'],
+            );
+        } catch (RateLimitException) {
+            throw new \LLM\Agents\LLM\Exception\RateLimitException();
+        } catch (TimeoutException) {
+            throw new \LLM\Agents\LLM\Exception\TimeoutException();
+        }
+    }
+    protected function buildOptions(OptionsInterface $options): array
+    {
+        $result = $this->defaultOptions;
+        // only keys that present in default options should be replaced
+        foreach ($options as $key => $value) {
+            if (isset($this->defaultOptions[$key])) {
+                $result[$key] = $value;
+            }
+        }
+        if (!isset($result['model'])) {
+            throw new \InvalidArgumentException('Model is required');
+        }
+        // filter out null options
+        return \array_filter($result, static fn($value): bool => $value !== null);
+    }
+}
+//vendor/llm-agents/openai-client/src
+namespace LLM\Agents\OpenAI\Client;
+interface StreamChunkCallbackInterface
+{
+    public function __invoke(?string $chunk, bool $stop, ?string $finishReason = null): void;
+}
+//vendor/llm-agents/openai-client/src/Event
+namespace LLM\Agents\OpenAI\Client\Event;
+final readonly class ToolCall
+{
+    public function __construct(
+        public string $id,
+        public string $name,
+        public string $arguments,
+    ) {}
+}
+//vendor/llm-agents/openai-client/src/Event
+namespace LLM\Agents\OpenAI\Client\Event;
+final readonly class MessageChunk
+{
+    public function __construct(
+        public string $chunk,
+        public bool $stop,
+        public ?string $finishReason = null,
+    ) {}
+}
+//vendor/llm-agents/openai-client/src
+namespace LLM\Agents\OpenAI\Client;
+use LLM\Agents\LLM\ContextInterface;
+final class Context implements ContextInterface
+{
+}
+//vendor/llm-agents/openai-client/src
+namespace LLM\Agents\OpenAI\Client;
+use LLM\Agents\LLM\OptionsInterface;
+use Traversable;
+readonly class Options implements OptionsInterface
+{
+    public function __construct(
+        private array $options = [],
+    ) {}
+    public function withModel(OpenAIModel $model): static
+    {
+        return $this->with(Option::Model, $model->value);
+    }
+    public function withTemperature(float $temperature): static
+    {
+        return $this->with(Option::Temperature, $temperature);
+    }
+    public function withMaxTokens(int $maxTokens): static
+    {
+        return $this->with(Option::MaxTokens, $maxTokens);
+    }
+    public function getIterator(): Traversable
+    {
+        return new \ArrayIterator($this->options);
+    }
+    public function has(string|Option $option): bool
+    {
+        return isset($this->options[$this->prepareKey($option)]);
+    }
+    public function get(string|Option $option, mixed $default = null): mixed
+    {
+        return $this->options[$this->prepareKey($option)] ?? $default;
+    }
+    public function with(string|Option $option, mixed $value): static
+    {
+        $options = $this->options;
+        $options[$this->prepareKey($option)] = $value;
+        return new static($options);
+    }
+    private function prepareKey(string|Option $key): string
+    {
+        return match (true) {
+            $key instanceof Option => $key->value,
+            default => $key,
+        };
+    }
+    public function merge(OptionsInterface $options): static
+    {
+        $mergedOptions = $this->options;
+        foreach ($options as $key => $value) {
+            $mergedOptions[$key] = $value;
+        }
+        return new static($mergedOptions);
+    }
+}
+//vendor/llm-agents/openai-client/src/Exception
+namespace LLM\Agents\OpenAI\Client\Exception;
+final class RateLimitException extends OpenAiClientException
+{
+}
+//vendor/llm-agents/openai-client/src/Exception
+namespace LLM\Agents\OpenAI\Client\Exception;
+final class TimeoutException extends OpenAiClientException
+{
+}
+//vendor/llm-agents/openai-client/src/Exception
+namespace LLM\Agents\OpenAI\Client\Exception;
+class OpenAiClientException extends \Exception
+{
+}
+//vendor/llm-agents/openai-client/src/Exception
+namespace LLM\Agents\OpenAI\Client\Exception;
+final class LimitExceededException extends OpenAiClientException
+{
+}
+//vendor/llm-agents/openai-client/src
+namespace LLM\Agents\OpenAI\Client;
+enum Option: string
+{
+    // Configuration options
+    case Temperature = 'temperature';
+    case MaxTokens = 'max_tokens';
+    case TopP = 'top_p';
+    case FrequencyPenalty = 'frequency_penalty';
+    case PresencePenalty = 'presence_penalty';
+    case Stop = 'stop';
+    case LogitBias = 'logit_bias';
+    case Functions = 'functions';
+    case FunctionCall = 'function_call';
+    case User = 'user';
+    case Model = 'model';
+    // Application options
+    case Tools = 'tools';
+    case StreamChunkCallback = 'stream_chunk_callback';
+}
+//vendor/llm-agents/openai-client/src
+namespace LLM\Agents\OpenAI\Client;
+use LLM\Agents\OpenAI\Client\Exception\LimitExceededException;
+use LLM\Agents\OpenAI\Client\Exception\RateLimitException;
+use LLM\Agents\OpenAI\Client\Exception\TimeoutException;
+use LLM\Agents\OpenAI\Client\Parsers\ParserInterface;
+use LLM\Agents\LLM\Exception\LLMException;
+use LLM\Agents\LLM\Response\Response;
+use OpenAI\Responses\StreamResponse;
+use Psr\Http\Message\ResponseInterface;
+final class StreamResponseParser
+{
+    private array $parsers = [];
+    public function registerParser(string $type, ParserInterface $parser): void
+    {
+        $this->parsers[$type] = $parser;
+    }
+    /**
+     * @throws LimitExceededException
+     * @throws RateLimitException
+     * @throws TimeoutException
+     */
+    public function parse(StreamResponse $stream, ?StreamChunkCallbackInterface $callback = null): Response
+    {
+        $this->validateStreamResponse($stream);
+        $headers = $this->getHeaders($stream);
+        $responseClass = $this->getResponseClass($stream);
+        foreach ($this->parsers as $type => $parser) {
+            if ($responseClass === $type) {
+                return $parser->parse($stream, $callback);
+            }
+        }
+        throw new LLMException(
+            \sprintf(
+                'Parser not found for response class: %s',
+                $responseClass,
+            ),
+        );
+    }
+    private function getHeaders(StreamResponse $stream): array
+    {
+        $headers = [];
+        $response = $this->fetchResponse($stream);
+        foreach ($response->getHeaders() as $name => $values) {
+            $value = $response->getHeaderLine($name);
+            // mapping value type
+            if (\is_numeric($value)) {
+                $value = (float) $value;
+            }
+            $headers[$name] = $value;
+        }
+        return $headers;
+    }
+    private function validateStreamResponse(StreamResponse $stream): void
+    {
+        $response = $this->fetchResponse($stream);
+        if ($response->getStatusCode() !== 200) {
+            try {
+                $error = \json_decode($response->getBody()->getContents());
+            } catch (\Throwable) {
+                throw new LLMException(
+                    \sprintf(
+                        'OpenAI API returned status code %s',
+                        $response->getStatusCode(),
+                    ),
+                    $response->getStatusCode(),
+                );
+            }
+            $message = $error->error->message;
+            if ($message === '') {
+                $message = $error->error->code;
+            }
+            throw new LLMException($message);
+        }
+    }
+    private function fetchResponse(StreamResponse $response): ResponseInterface
+    {
+        $closure = \Closure::bind(function (StreamResponse $class) {
+            return $class->response;
+        }, null, StreamResponse::class);
+        return $closure($response);
+    }
+    public function getResponseClass(StreamResponse $stream): mixed
+    {
+        // todo: find a better way to get response class
+        $reflection = new \ReflectionClass($stream);
+        $responseClass = $reflection->getProperty('responseClass');
+        $responseClass->setAccessible(true);
+        $responseClass = $responseClass->getValue($stream);
+        return $responseClass;
+    }
+}
+//vendor/llm-agents/openai-client/src/Parsers
+namespace LLM\Agents\OpenAI\Client\Parsers;
+use LLM\Agents\OpenAI\Client\Event\MessageChunk;
+use LLM\Agents\OpenAI\Client\Exception\LimitExceededException;
+use LLM\Agents\OpenAI\Client\Exception\RateLimitException;
+use LLM\Agents\OpenAI\Client\Exception\TimeoutException;
+use LLM\Agents\OpenAI\Client\StreamChunkCallbackInterface;
+use LLM\Agents\LLM\Response\FinishReason;
+use LLM\Agents\LLM\Response\Response;
+use LLM\Agents\LLM\Response\StreamChatResponse;
+use LLM\Agents\LLM\Response\ToolCall;
+use LLM\Agents\LLM\Response\ToolCalledResponse;
+use OpenAI\Contracts\ResponseStreamContract;
+use OpenAI\Responses\Chat\CreateStreamedResponse;
+use Psr\EventDispatcher\EventDispatcherInterface;
+final readonly class ChatResponseParser implements ParserInterface
+{
+    public function __construct(
+        private ?EventDispatcherInterface $eventDispatcher = null,
+    ) {}
+    /**
+     * @throws LimitExceededException
+     * @throws RateLimitException
+     * @throws TimeoutException
+     */
+    public function parse(ResponseStreamContract $stream, ?StreamChunkCallbackInterface $callback = null): Response
+    {
+        $callback ??= static fn(?string $chunk, bool $stop, ?string $finishReason = null) => null;
+        $result = '';
+        $finishReason = null;
+        /** @var ToolCall[] $toolCalls */
+        $toolCalls = [];
+        $toolIndex = 0;
+        /** @var CreateStreamedResponse[] $stream */
+        foreach ($stream as $chunk) {
+            if ($chunk->choices[0]->finishReason !== null) {
+                $callback(chunk: '', stop: true, finishReason: $chunk->choices[0]->finishReason);
+                $this->eventDispatcher?->dispatch(
+                    new MessageChunk(
+                        chunk: '',
+                        stop: true,
+                        finishReason: $chunk->choices[0]->finishReason,
+                    ),
+                );
+                $finishReason = FinishReason::from($chunk->choices[0]->finishReason);
+                break;
+            }
+            if ($chunk->choices[0]->delta->role !== null) {
+                // For single tool call
+                if ($chunk->choices[0]->delta?->toolCalls !== []) {
+                    foreach ($chunk->choices[0]->delta->toolCalls as $i => $toolCall) {
+                        $toolCalls[$toolIndex] = new ToolCall(
+                            id: $toolCall->id,
+                            name: $toolCall->function->name,
+                            arguments: '',
+                        );
+                    }
+                }
+                continue;
+            }
+            if ($chunk->choices[0]->delta?->toolCalls !== []) {
+                foreach ($chunk->choices[0]->delta->toolCalls as $i => $toolCall) {
+                    // For multiple tool calls
+                    if ($toolCall->id !== null) {
+                        $toolIndex++;
+                        $toolCalls[$toolIndex] = new ToolCall(
+                            id: $toolCall->id,
+                            name: $toolCall->function->name,
+                            arguments: '',
+                        );
+                        continue;
+                    }
+                    $toolCalls[$toolIndex] = $toolCalls[$toolIndex]->withArguments($toolCall->function->arguments);
+                }
+                continue;
+            }
+            $callback(chunk: $chunk->choices[0]->delta->content, stop: false);
+            $this->eventDispatcher->dispatch(
+                new MessageChunk(
+                    chunk: $chunk->choices[0]->delta->content,
+                    stop: false,
+                    finishReason: $chunk->choices[0]->finishReason,
+                ),
+            );
+            $result .= $chunk->choices[0]->delta->content;
+        }
+        foreach ($toolCalls as $toolCall) {
+            $this->eventDispatcher?->dispatch(
+                new \LLM\Agents\OpenAI\Client\Event\ToolCall(
+                    id: $toolCall->id,
+                    name: $toolCall->name,
+                    arguments: $toolCall->arguments,
+                ),
+            );
+        }
+        return match (true) {
+            $finishReason === FinishReason::Stop => new StreamChatResponse(
+                content: $result,
+                finishReason: $finishReason->value,
+            ),
+            $finishReason === FinishReason::ToolCalls => new ToolCalledResponse(
+                content: $result,
+                tools: \array_values($toolCalls),
+                finishReason: $finishReason->value,
+            ),
+            $finishReason === FinishReason::Length => throw new LimitExceededException(),
+            $finishReason === FinishReason::Timeout => throw new TimeoutException(),
+            $finishReason === FinishReason::Limit => throw new RateLimitException(),
+        };
+    }
+}
+//vendor/llm-agents/openai-client/src/Parsers
+namespace LLM\Agents\OpenAI\Client\Parsers;
+use LLM\Agents\OpenAI\Client\Exception\LimitExceededException;
+use LLM\Agents\OpenAI\Client\Exception\RateLimitException;
+use LLM\Agents\OpenAI\Client\Exception\TimeoutException;
+use LLM\Agents\OpenAI\Client\StreamChunkCallbackInterface;
+use LLM\Agents\LLM\Response\Response;
+use OpenAI\Contracts\ResponseStreamContract;
+interface ParserInterface
+{
+    /**
+     * @throws LimitExceededException
+     * @throws RateLimitException
+     * @throws TimeoutException
+     */
+    public function parse(ResponseStreamContract $stream, ?StreamChunkCallbackInterface $callback = null): Response;
+}
+//vendor/llm-agents/json-schema-mapper/src/Integration/Laravel
+namespace LLM\Agents\JsonSchema\Mapper\Integration\Laravel;
+use CuyZ\Valinor\Cache\FileSystemCache;
+use CuyZ\Valinor\Mapper\TreeMapper;
+use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Support\ServiceProvider;
+use LLM\Agents\JsonSchema\Mapper\MapperBuilder;
+use LLM\Agents\JsonSchema\Mapper\SchemaMapper;
+use LLM\Agents\Tool\SchemaMapperInterface;
+final class SchemaMapperServiceProvider extends ServiceProvider
+{
+    public function register(): void
+    {
+        $this->app->singleton(
+            SchemaMapperInterface::class,
+            SchemaMapper::class,
+        );
+        $this->app->singleton(
+            TreeMapper::class,
+            static fn(
+                Application $app,
+            ) => $app->make(MapperBuilder::class)->build(),
+        );
+        $this->app->singleton(
+            MapperBuilder::class,
+            static fn(
+                Application $app,
+            ) => new MapperBuilder(
+                cache: match (true) {
+                    $app->environment('prod') => new FileSystemCache(
+                        cacheDir: $app->storagePath('cache/valinor'),
+                    ),
+                    default => null,
+                },
+            ),
+        );
+    }
+}
+//vendor/llm-agents/json-schema-mapper/src/Integration/Spiral
+namespace LLM\Agents\JsonSchema\Mapper\Integration\Spiral;
+use CuyZ\Valinor\Cache\FileSystemCache;
+use CuyZ\Valinor\Mapper\TreeMapper;
+use LLM\Agents\JsonSchema\Mapper\MapperBuilder;
+use LLM\Agents\JsonSchema\Mapper\SchemaMapper;
+use LLM\Agents\Tool\SchemaMapperInterface;
+use Spiral\Boot\Bootloader\Bootloader;
+use Spiral\Boot\DirectoriesInterface;
+use Spiral\Boot\Environment\AppEnvironment;
+final class SchemaMapperBootloader extends Bootloader
+{
+    public function defineSingletons(): array
+    {
+        return [
+            SchemaMapperInterface::class => SchemaMapper::class,
+            TreeMapper::class => static fn(
+                MapperBuilder $builder,
+            ) => $builder->build(),
+            MapperBuilder::class => static fn(
+                DirectoriesInterface $dirs,
+                AppEnvironment $env,
+            ) => new MapperBuilder(
+                cache: match ($env) {
+                    AppEnvironment::Production => new FileSystemCache(
+                        cacheDir: $dirs->get('runtime') . 'cache/valinor',
+                    ),
+                    default => null,
+                },
+            ),
+        ];
+    }
+}
+//vendor/llm-agents/json-schema-mapper/src
+namespace LLM\Agents\JsonSchema\Mapper;
+use CuyZ\Valinor\Mapper\TreeMapper;
+use CuyZ\Valinor\MapperBuilder as BaseMapperBuilder;
+use Psr\SimpleCache\CacheInterface;
+final readonly class MapperBuilder
+{
+    public function __construct(
+        private ?CacheInterface $cache = null,
+    ) {}
+    public function build(): TreeMapper
+    {
+        $builder = (new BaseMapperBuilder())
+            ->enableFlexibleCasting()
+            ->allowPermissiveTypes();
+        if ($this->cache) {
+            $builder = $builder->withCache($this->cache);
+        }
+        return $builder->mapper();
+    }
+}
+//vendor/llm-agents/json-schema-mapper/src
+namespace LLM\Agents\JsonSchema\Mapper;
+use CuyZ\Valinor\Mapper\TreeMapper;
+use LLM\Agents\Tool\SchemaMapperInterface;
+use Spiral\JsonSchemaGenerator\Generator as JsonSchemaGenerator;
+final readonly class SchemaMapper implements SchemaMapperInterface
+{
+    public function __construct(
+        private JsonSchemaGenerator $generator,
+        private TreeMapper $mapper,
+    ) {}
+    public function toJsonSchema(string $class): array
+    {
+        if (\json_validate($class)) {
+            return \json_decode($class, associative: true);
+        }
+        if (\class_exists($class)) {
+            return $this->generator->generate($class)->jsonSerialize();
+        }
+        throw new \InvalidArgumentException(\sprintf('Invalid class or JSON schema provided: %s', $class));
+    }
+    /**
+     * @template T of object
+     * @param class-string<T>|string $class
+     * @return T
+     */
+    public function toObject(string $json, ?string $class = null): object
+    {
+        if ($class === null) {
+            return \json_decode($json, associative: false);
+        }
+        return $this->mapper->map($class, \json_decode($json, associative: true));
+    }
+}

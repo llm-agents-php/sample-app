@@ -19,7 +19,7 @@ use Spiral\Console\Command;
 final class ChatWindowCommand extends Command
 {
     #[Argument(name: 'session_uuid')]
-    public string $sessionUuid;
+    public ?string $sessionUuid = null;
 
     public function __invoke(
         ChatHistoryRepositoryInterface $chatHistory,
@@ -32,7 +32,9 @@ final class ChatWindowCommand extends Command
             chat: $chatService,
         );
 
-        $chatWindow->run(Uuid::fromString($this->sessionUuid));
+        $chatWindow->run(
+            sessionUuid: $this->sessionUuid ? Uuid::fromString($this->sessionUuid) : null,
+        );
 
         return self::SUCCESS;
     }

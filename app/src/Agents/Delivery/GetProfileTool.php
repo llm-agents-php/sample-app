@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace App\Agents\Delivery;
 
-use App\Domain\Tool\PhpTool;
+use LLM\Agents\Tool\PhpTool;
 
 /**
- * @extends  PhpTool<ProfileInput>
+ * @extends PhpTool<ProfileInput>
  */
 final class GetProfileTool extends PhpTool
 {

@@ -11,6 +11,7 @@ use LLM\Agents\Chat\Console\ChatSession;
 use LLM\Agents\Tool\ToolRegistryInterface;
 use Ramsey\Uuid\Uuid;
 use Spiral\Console\Attribute\AsCommand;
+use Spiral\Console\Attribute\Option;
 use Spiral\Console\Command;
 use Spiral\Console\Console;
 use Symfony\Component\Console\Cursor;
@@ -21,6 +22,9 @@ use Symfony\Component\Console\Cursor;
 )]
 final class ChatCommand extends Command
 {
+    #[Option(name: 'latest', shortcut: 'l', description: 'Open latest chat session')]
+    public bool $openLatest = false;
+
     public function __invoke(
         AgentRegistryInterface $agents,
         ChatServiceInterface $chat,
@@ -41,6 +45,11 @@ final class ChatCommand extends Command
             tools: $tools,
         );
 
-        $chat->run(accountUuid: Uuid::fromString('00000000-0000-0000-0000-000000000000'));
+        $chat->run(
+            accountUuid: Uuid::fromString('00000000-0000-0000-0000-000000000000'),
+            openLatest: $this->openLatest,
+        );
+
+        return self::SUCCESS;
     }
 }

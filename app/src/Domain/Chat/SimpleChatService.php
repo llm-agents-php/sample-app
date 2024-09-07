@@ -63,7 +63,7 @@ final readonly class SimpleChatService implements ChatServiceInterface
         );
 
         // Set the title of the session to the agent's description.
-        $session->title = $agent->getDescription();
+        $session->setDescription($agent->getDescription());
 
         $this->updateSession($session);
 
@@ -221,5 +221,15 @@ final readonly class SimpleChatService implements ChatServiceInterface
             id: $tool->id,
             content: [$functionResult],
         );
+    }
+
+    public function getLatestSession(): ?SessionInterface
+    {
+        return $this->sessions->findOneLatest();
+    }
+
+    public function getLatestSessions(int $limit = 3): array
+    {
+        return \iterator_to_array($this->sessions->findAllLatest($limit));
     }
 }

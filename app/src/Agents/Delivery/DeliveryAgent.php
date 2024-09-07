@@ -25,7 +25,11 @@ final class DeliveryAgent extends AgentAggregate
             key: self::NAME,
             name: 'Order Assistant',
             description: 'Helps customers with order-related questions.',
-            instruction: 'You are a helpful customer support assistant. Use the supplied tools to assist the user.',
+            instruction: <<<'INSTRUCTION'
+You are a helpful customer support assistant.
+Use the supplied tools to assist the user.
+INSTRUCTION
+,
         );
 
         $aggregate = new self($agent);

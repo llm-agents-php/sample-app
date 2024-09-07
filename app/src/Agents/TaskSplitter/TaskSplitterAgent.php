@@ -23,7 +23,12 @@ final class TaskSplitterAgent extends AgentAggregate
             key: self::NAME,
             name: 'Task Splitter',
             description: 'An agent that splits project descriptions into structured task lists.',
-            instruction: 'You are a task organization assistant. Your primary goal is to analyze project descriptions and break them down into well-structured task lists with subtasks.',
+            instruction: <<<'INSTRUCTION'
+You are a task organization assistant.
+
+Your primary goal is to analyze project descriptions and break them down into well-structured task lists with subtasks.
+INSTRUCTION
+            ,
         );
 
         $aggregate = new self($agent);

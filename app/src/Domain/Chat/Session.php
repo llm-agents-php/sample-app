@@ -79,4 +79,14 @@ class Session implements SessionInterface
     {
         return $this->agentName;
     }
+
+    public function setDescription(string $description): void
+    {
+        $this->title = $description;
+    }
+
+    public function getDescription(): ?string
+    {
+        return $this->title;
+    }
 }

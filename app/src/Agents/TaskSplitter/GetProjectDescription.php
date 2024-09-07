@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace App\Agents\TaskSplitter;
 
-use App\Domain\Tool\PhpTool;
+use LLM\Agents\Tool\PhpTool;
 
 /**
- * @extends  PhpTool<ProjectDescriptionInput>
+ * @extends PhpTool<ProjectDescriptionInput>
  */
 final class GetProjectDescription extends PhpTool
 {

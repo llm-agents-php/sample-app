@@ -1,0 +1,1258 @@
+This is an example of Application Layer. It can be used as a template for creating new applications.
+//app/src/Application
+namespace App\Application;
+use LLM\Agents\Tool\ToolInterface;
+use LLM\Agents\Tool\ToolRegistryInterface;
+use Spiral\Core\Container;
+use Spiral\Tokenizer\Attribute\TargetClass;
+use Spiral\Tokenizer\TokenizationListenerInterface;
+#[TargetClass(ToolInterface::class)]
+final readonly class ToolsLocator implements TokenizationListenerInterface
+{
+    public function __construct(
+        private Container $container,
+        private ToolRegistryInterface $tools,
+    ) {}
+    public function listen(\ReflectionClass $class): void
+    {
+        // Skip abstract classes and interfaces
+        if (!$class->isInstantiable()) {
+            return;
+        }
+        $tool = $this->container->make($class->getName());
+        $this->tools->register($tool);
+    }
+    public function finalize(): void
+    {
+        // TODO: Implement finalize() method.
+    }
+}
+//app/src/Application
+namespace App\Application;
+use App\Application\Exception\InvalidArgumentException;
+final class Assert extends \Webmozart\Assert\Assert
+{
+    protected static function reportInvalidArgument($message): never
+    {
+        throw new InvalidArgumentException($message);
+    }
+}
+//app/src/Application
+namespace App\Application;
+use LLM\Agents\Agent\AgentFactoryInterface;
+use LLM\Agents\Agent\AgentRegistryInterface;
+use Spiral\Core\Container;
+use Spiral\Tokenizer\Attribute\TargetClass;
+use Spiral\Tokenizer\TokenizationListenerInterface;
+#[TargetClass(AgentFactoryInterface::class)]
+final readonly class AgentsLocator implements TokenizationListenerInterface
+{
+    public function __construct(
+        private Container $container,
+        private AgentRegistryInterface $agents,
+    ) {}
+    public function listen(\ReflectionClass $class): void
+    {
+        // Skip abstract classes and interfaces
+        if (!$class->isInstantiable()) {
+            return;
+        }
+        /** @var AgentFactoryInterface $factory */
+        $factory = $this->container->make($class->getName());
+        $this->agents->register($factory->create());
+    }
+    public function finalize(): void
+    {
+        // TODO: Implement finalize() method.
+    }
+}
+//app/src/Application
+namespace App\Application;
+use LLM\Agents\Agent\SiteStatusChecker\Integrations\Spiral\SiteStatusCheckerBootloader;
+use LLM\Agents\Agent\SmartHomeControl\Integrations\Spiral\SmartHomeControlBootloader;
+use LLM\Agents\Agent\SymfonyConsole\Integrations\Spiral\SymfonyConsoleBootloader;
+use LLM\Agents\JsonSchema\Mapper\Integration\Spiral\SchemaMapperBootloader;
+use LLM\Agents\OpenAI\Client\Integration\Spiral\OpenAIClientBootloader;
+use LLM\Agents\PromptGenerator\Integration\Spiral\PromptGeneratorBootloader;
+use Spiral\Boot\Bootloader\CoreBootloader;
+use Spiral\DotEnv\Bootloader\DotenvBootloader;
+use Spiral\Prototype\Bootloader\PrototypeBootloader;
+use Spiral\Tokenizer\Bootloader\TokenizerListenerBootloader;
+class Kernel extends \Spiral\Framework\Kernel
+{
+    public function defineSystemBootloaders(): array
+    {
+        return [
+            CoreBootloader::class,
+            DotenvBootloader::class,
+            TokenizerListenerBootloader::class,
+        ];
+    }
+    public function defineBootloaders(): array
+    {
+        return [
+            // Infrastructure
+            Bootloader\Infrastructure\LogsBootloader::class,
+            Bootloader\Infrastructure\ConsoleBootloader::class,
+            Bootloader\Infrastructure\RoadRunnerBootloader::class,
+            Bootloader\Infrastructure\CloudStorageBootloader::class,
+            Bootloader\Infrastructure\SecurityBootloader::class,
+            Bootloader\Infrastructure\CycleOrmBootloader::class,
+            Bootloader\Infrastructure\QdrantBootloader::class,
+            // Prototyping
+            PrototypeBootloader::class,
+            // LLM
+            PromptGeneratorBootloader::class,
+            OpenAIClientBootloader::class,
+            SchemaMapperBootloader::class,
+            // Application
+            Bootloader\AppBootloader::class,
+            Bootloader\EventsBootloader::class,
+            Bootloader\AgentsBootloader::class,
+            Bootloader\AgentsChatBootloader::class,
+            Bootloader\PersistenceBootloader::class,
+            Bootloader\SmartHomeBootloader::class,
+            // Agents
+            SiteStatusCheckerBootloader::class,
+            SmartHomeControlBootloader::class,
+            SymfonyConsoleBootloader::class,
+        ];
+    }
+}
+//app/src/Application/Bootloader
+namespace App\Application\Bootloader;
+use Spiral\Boot\Bootloader\Bootloader;
+final class AppBootloader extends Bootloader
+{
+    public function defineSingletons(): array
+    {
+        return [];
+    }
+}
+//app/src/Application/Bootloader/Infrastructure
+namespace App\Application\Bootloader\Infrastructure;
+use Spiral\Boot\Bootloader\Bootloader;
+use Spiral\Cycle\Bootloader as CycleBridge;
+use Spiral\DatabaseSeeder\Bootloader\DatabaseSeederBootloader;
+final class CycleOrmBootloader extends Bootloader
+{
+    public function defineDependencies(): array
+    {
+        return [
+            CycleBridge\DatabaseBootloader::class,
+            CycleBridge\MigrationsBootloader::class,
+            CycleBridge\SchemaBootloader::class,
+            CycleBridge\CycleOrmBootloader::class,
+            CycleBridge\AnnotatedBootloader::class,
+        ];
+    }
+}
+//app/src/Application/Bootloader/Infrastructure
+namespace App\Application\Bootloader\Infrastructure;
+use Spiral\Boot\Bootloader\Bootloader;
+use Spiral\RoadRunnerBridge\Bootloader as RoadRunnerBridge;
+final class RoadRunnerBootloader extends Bootloader
+{
+    public function defineDependencies(): array
+    {
+        return [
+            RoadRunnerBridge\LoggerBootloader::class,
+//            RoadRunnerBridge\QueueBootloader::class,
+//            RoadRunnerBridge\HttpBootloader::class,
+            RoadRunnerBridge\CacheBootloader::class,
+            RoadRunnerBridge\CentrifugoBootloader::class,
+        ];
+    }
+}
+//app/src/Application/Bootloader/Infrastructure
+namespace App\Application\Bootloader\Infrastructure;
+use LLM\Agents\Embeddings\EmbeddingSourceManager;
+use LLM\Agents\Embeddings\EmbeddingSourceRegistryInterface;
+use LLM\Agents\Embeddings\EmbeddingSourceRepositoryInterface;
+use LLM\Agents\Embeddings\QdrantVectorStorage;
+use LLM\Agents\Embeddings\VectorStorageEmbeddingRepository;
+use LLM\Agents\Embeddings\VectorStorageInterface;
+use Qdrant\ClientInterface;
+use Qdrant\Qdrant;
+use Spiral\Boot\Bootloader\Bootloader;
+use Qdrant\Config;
+use Qdrant\Http\Builder;
+use Spiral\Boot\EnvironmentInterface;
+final class QdrantBootloader extends Bootloader
+{
+    public function defineSingletons(): array
+    {
+        return [
+            ClientInterface::class => static fn(
+                EnvironmentInterface $env,
+            ): ClientInterface => new Qdrant(
+                transport: (new Builder())->build(
+                    (new Config(
+                        host: $env->get('QDRANT_HOST'),
+                    ))->setApiKey(
+                        apiKey: $env->get('QDRANT_API_KEY'),
+                    ),
+                ),
+            ),
+            VectorStorageInterface::class => QdrantVectorStorage::class,
+            EmbeddingSourceManager::class => static function (
+                VectorStorageInterface $storage,
+            ): EmbeddingSourceManager {
+                $manager = new EmbeddingSourceManager($storage);
+                $manager->register(
+                    name: 'spiral-docs',
+                    repository: new VectorStorageEmbeddingRepository(
+                        storage: $storage,
+                        collection: 'docs',
+                    ),
+                );
+                return $manager;
+            },
+            EmbeddingSourceRepositoryInterface::class => EmbeddingSourceManager::class,
+            EmbeddingSourceRegistryInterface::class => EmbeddingSourceManager::class,
+        ];
+    }
+}
+//app/src/Application/Bootloader/Infrastructure
+namespace App\Application\Bootloader\Infrastructure;
+use Spiral\Boot\Bootloader\Bootloader;
+use Spiral\Distribution\Bootloader\DistributionBootloader;
+use Spiral\Storage\Bootloader\StorageBootloader;
+final class CloudStorageBootloader extends Bootloader
+{
+    public function defineDependencies(): array
+    {
+        return [
+            StorageBootloader::class,
+            DistributionBootloader::class,
+        ];
+    }
+}
+//app/src/Application/Bootloader/Infrastructure
+namespace App\Application\Bootloader\Infrastructure;
+use Spiral\Boot\Bootloader\Bootloader;
+use Spiral\Bootloader as Framework;
+final class SecurityBootloader extends Bootloader
+{
+    public function defineDependencies(): array
+    {
+        return [
+            Framework\Security\EncrypterBootloader::class,
+            Framework\Security\FiltersBootloader::class,
+        ];
+    }
+}
+//app/src/Application/Bootloader/Infrastructure
+namespace App\Application\Bootloader\Infrastructure;
+use Spiral\Boot\AbstractKernel;
+use Spiral\Boot\Bootloader\Bootloader;
+use Spiral\Bootloader as Framework;
+use Spiral\Exceptions\ExceptionHandler;
+use Spiral\Exceptions\Renderer\ConsoleRenderer;
+use Spiral\Exceptions\Renderer\JsonRenderer;
+use Spiral\Exceptions\Reporter\FileReporter;
+use Spiral\Exceptions\Reporter\LoggerReporter;
+use Spiral\Http\ErrorHandler\PlainRenderer;
+use Spiral\Http\ErrorHandler\RendererInterface;
+use Spiral\Http\Middleware\ErrorHandlerMiddleware\EnvSuppressErrors;
+use Spiral\Http\Middleware\ErrorHandlerMiddleware\SuppressErrorsInterface;
+use Spiral\Monolog\Bootloader\MonologBootloader;
+use Spiral\Sentry\Bootloader\SentryReporterBootloader;
+final class LogsBootloader extends Bootloader
+{
+    public function __construct(
+        private readonly ExceptionHandler $handler,
+    ) {
+    }
+    public function defineDependencies(): array
+    {
+        return [
+            // Logging and exceptions handling
+            MonologBootloader::class,
+            Framework\SnapshotsBootloader::class,
+            // Sentry and Data collectors
+            Framework\DebugBootloader::class,
+            Framework\Debug\LogCollectorBootloader::class,
+            Framework\Debug\HttpCollectorBootloader::class,
+        ];
+    }
+    public function defineBindings(): array
+    {
+        return [
+            SuppressErrorsInterface::class => EnvSuppressErrors::class,
+            RendererInterface::class => PlainRenderer::class,
+        ];
+    }
+    public function init(AbstractKernel $kernel): void
+    {
+        // Register the console renderer, that will be used when the application
+        // is running in the console.
+        $this->handler->addRenderer(new ConsoleRenderer());
+        $kernel->running(function (): void {
+            // Register the JSON renderer, that will be used when the application is
+            // running in the HTTP context and a JSON response is expected.
+            $this->handler->addRenderer(new JsonRenderer());
+        });
+    }
+    public function boot(LoggerReporter $logger, FileReporter $files): void
+    {
+        // Register the logger reporter, that will be used to log the exceptions using
+        // the logger component.
+        $this->handler->addReporter($logger);
+        // Register the file reporter. It allows you to save detailed information about an exception to a file
+        // known as snapshot.
+        $this->handler->addReporter($files);
+    }
+}
+//app/src/Application/Bootloader/Infrastructure
+namespace App\Application\Bootloader\Infrastructure;
+use Spiral\Boot\Bootloader\Bootloader;
+use Spiral\Cycle\Bootloader as CycleBridge;
+use Spiral\Bootloader as Framework;
+use Spiral\Scaffolder\Bootloader\ScaffolderBootloader;
+use Spiral\RoadRunnerBridge\Bootloader as RoadRunnerBridge;
+final class ConsoleBootloader extends Bootloader
+{
+    public function defineDependencies(): array
+    {
+        return [
+            Framework\CommandBootloader::class,
+            ScaffolderBootloader::class,
+            CycleBridge\CommandBootloader::class,
+            CycleBridge\ScaffolderBootloader::class,
+            RoadRunnerBridge\CommandBootloader::class,
+            RoadRunnerBridge\ScaffolderBootloader::class,
+        ];
+    }
+}
+//app/src/Application/Bootloader
+namespace App\Application\Bootloader;
+use App\Domain\Chat\PromptGenerator\SessionContextInjector;
+use App\Domain\Chat\SimpleChatService;
+use App\Infrastructure\RoadRunner\Chat\ChatHistoryRepository;
+use LLM\Agents\Chat\ChatHistoryRepositoryInterface;
+use LLM\Agents\Chat\ChatServiceInterface;
+use LLM\Agents\PromptGenerator\Interceptors\AgentMemoryInjector;
+use LLM\Agents\PromptGenerator\Interceptors\InstructionGenerator;
+use LLM\Agents\PromptGenerator\Interceptors\LinkedAgentsInjector;
+use LLM\Agents\PromptGenerator\Interceptors\UserPromptInjector;
+use LLM\Agents\PromptGenerator\PromptGeneratorPipeline;
+use Spiral\Boot\Bootloader\Bootloader;
+use Spiral\Cache\CacheStorageProviderInterface;
+final class AgentsChatBootloader extends Bootloader
+{
+    public function defineSingletons(): array
+    {
+        return [
+            ChatServiceInterface::class => SimpleChatService::class,
+            ChatHistoryRepositoryInterface::class => static fn(
+                CacheStorageProviderInterface $cache,
+            ): ChatHistoryRepositoryInterface => new ChatHistoryRepository(
+                $cache->storage('chat-messages'),
+            ),
+            PromptGeneratorPipeline::class => static function (
+                LinkedAgentsInjector $linkedAgentsInjector,
+            ): PromptGeneratorPipeline {
+                $pipeline = new PromptGeneratorPipeline();
+                return $pipeline->withInterceptor(
+                    new InstructionGenerator(),
+                    new AgentMemoryInjector(),
+                    $linkedAgentsInjector,
+                    new SessionContextInjector(),
+                    new UserPromptInjector(),
+                );
+            },
+        ];
+    }
+}
+//app/src/Application/Bootloader
+namespace App\Application\Bootloader;
+use Spiral\Boot\Bootloader\Bootloader;
+use Spiral\League\Event\Bootloader\EventBootloader;
+final class EventsBootloader extends Bootloader
+{
+    public function defineDependencies(): array
+    {
+        return [
+            EventBootloader::class,
+        ];
+    }
+    public function defineSingletons(): array
+    {
+        return [
+        ];
+    }
+}
+//app/src/Application/Bootloader
+namespace App\Application\Bootloader;
+use App\Domain\Chat\EntityManagerInterface;
+use App\Domain\Chat\SessionRepositoryInterface;
+use App\Infrastructure\CycleOrm\Entity\SessionEntityManager;
+use App\Infrastructure\CycleOrm\Repository\SessionRepository;
+use Cycle\ORM\ORMInterface;
+use Cycle\ORM\Select;
+use Spiral\Boot\Bootloader\Bootloader;
+final class PersistenceBootloader extends Bootloader
+{
+    public function defineSingletons(): array
+    {
+        return [
+            SessionRepositoryInterface::class => static fn(
+                ORMInterface $orm,
+            ) => new SessionRepository(new Select(orm: $orm, role: SessionRepository::ROLE)),
+            EntityManagerInterface::class => SessionEntityManager::class,
+        ];
+    }
+}
+//app/src/Application/Bootloader
+namespace App\Application\Bootloader;
+use App\Agents\DynamicMemoryTool\DynamicMemoryTool;
+use App\Infrastructure\RoadRunner\SmartHome\DeviceStateManager;
+use LLM\Agents\Agent\AgentRepositoryInterface;
+use LLM\Agents\Agent\SmartHomeControl\SmartHome\Devices\Light;
+use LLM\Agents\Agent\SmartHomeControl\SmartHome\Devices\SmartAppliance;
+use LLM\Agents\Agent\SmartHomeControl\SmartHome\Devices\Thermostat;
+use LLM\Agents\Agent\SmartHomeControl\SmartHome\Devices\TV;
+use LLM\Agents\Agent\SmartHomeControl\SmartHome\DeviceStateRepositoryInterface;
+use LLM\Agents\Agent\SmartHomeControl\SmartHome\DeviceStateStorageInterface;
+use LLM\Agents\Agent\SmartHomeControl\SmartHome\SmartHomeSystem;
+use LLM\Agents\Agent\SmartHomeControl\SmartHomeControlAgent;
+use LLM\Agents\Solution\ToolLink;
+use Spiral\Boot\Bootloader\Bootloader;
+use Spiral\Cache\CacheStorageProviderInterface;
+final class SmartHomeBootloader extends Bootloader
+{
+    public function defineSingletons(): array
+    {
+        return [
+            DeviceStateManager::class => static function (
+                CacheStorageProviderInterface $provider,
+            ): DeviceStateManager {
+                return new DeviceStateManager($provider->storage('smart-home'));
+            },
+            DeviceStateStorageInterface::class => DeviceStateManager::class,
+            DeviceStateRepositoryInterface::class => DeviceStateManager::class,
+            SmartHomeSystem::class => static function (
+                DeviceStateStorageInterface $stateStorage,
+                DeviceStateRepositoryInterface $stateRepository,
+            ): SmartHomeSystem {
+                $smartHome = new SmartHomeSystem(
+                    stateStorage: $stateStorage,
+                    stateRepository: $stateRepository,
+                );
+                // Living Room Devices
+                $livingRoomAirConditioner = new SmartAppliance(
+                    'LR_AC_01',
+                    'Living Room Air Conditioner',
+                    'living_room',
+                    'air_conditioner',
+                    [
+                        'temperature' => 0,
+                        'mode' => 'cool',
+                    ],
+                );
+                $livingRoomMainLight = new Light('LR_MAIN_01', 'Living Room Main Light', 'living_room', 'dimmable');
+                $livingRoomTableLamp = new Light('LR_LAMP_01', 'Living Room Table Lamp', 'living_room', 'color');
+                $livingRoomThermostat = new Thermostat('LR_THERM_01', 'Living Room Thermostat', 'living_room', 24);
+                $livingRoomTV = new TV('LR_TV_01', 'Living Room TV', 'living_room', 20, 'HDMI 1');
+                $livingRoomFireplace = new SmartAppliance(
+                    'LR_FIRE_01',
+                    'Living Room Fireplace',
+                    'living_room',
+                    'fireplace',
+                    [
+                        'temperature' => 0,
+                    ],
+                );
+                $livingRoomSpeaker = new SmartAppliance(
+                    'LR_SPEAK_01',
+                    'Living Room Smart Speaker',
+                    'living_room',
+                    'speaker',
+                    [
+                        'volume' => 0,
+                        'radio_station' => 'Classical FM',
+                    ],
+                );
+                // Kitchen Devices
+                $kitchenMainLight = new Light('KT_MAIN_01', 'Kitchen Main Light', 'kitchen', 'dimmable');
+                $kitchenPendantLights = new Light('KT_PEND_01', 'Kitchen Pendant Lights', 'kitchen', 'dimmable');
+                $kitchenRefrigerator = new SmartAppliance(
+                    'KT_FRIDGE_01',
+                    'Smart Refrigerator',
+                    'kitchen',
+                    'refrigerator',
+                    [
+                        'temperature' => 37,
+                        'mode' => 'normal',
+                    ],
+                );
+                $kitchenOven = new SmartAppliance('KT_OVEN_01', 'Smart Oven', 'kitchen', 'oven');
+                $kitchenCoffeeMaker = new SmartAppliance(
+                    'KT_COFFEE_01', 'Smart Coffee Maker', 'kitchen', 'coffee_maker',
+                );
+                // Bedroom Devices
+                $bedroomMainLight = new Light('BR_MAIN_01', 'Bedroom Main Light', 'bedroom', 'dimmable');
+                $bedroomNightstandLeft = new Light('BR_NIGHT_L_01', 'Left Nightstand Lamp', 'bedroom', 'color');
+                $bedroomNightstandRight = new Light('BR_NIGHT_R_01', 'Right Nightstand Lamp', 'bedroom', 'color');
+                $bedroomThermostat = new Thermostat('BR_THERM_01', 'Bedroom Thermostat', 'bedroom', 68);
+                $bedroomTV = new TV('BR_TV_01', 'Bedroom TV', 'bedroom', 15, 'HDMI 1');
+                $bedroomCeilingFan = new SmartAppliance('BR_FAN_01', 'Bedroom Ceiling Fan', 'bedroom', 'fan');
+                // Bathroom Devices
+                $bathroomMainLight = new Light('BA_MAIN_01', 'Bathroom Main Light', 'bathroom', 'dimmable');
+                $bathroomMirrorLight = new Light('BA_MIRROR_01', 'Bathroom Mirror Light', 'bathroom', 'color');
+                $bathroomExhaustFan = new SmartAppliance('BA_FAN_01', 'Bathroom Exhaust Fan', 'bathroom', 'fan');
+                $bathroomSmartScale = new SmartAppliance('BA_SCALE_01', 'Smart Scale', 'bathroom', 'scale');
+                // Add all devices to the smart home system
+                $smartHome->addDevice($livingRoomAirConditioner);
+                $smartHome->addDevice($livingRoomMainLight);
+                $smartHome->addDevice($livingRoomTableLamp);
+                $smartHome->addDevice($livingRoomThermostat);
+                $smartHome->addDevice($livingRoomTV);
+                $smartHome->addDevice($livingRoomFireplace);
+                $smartHome->addDevice($livingRoomSpeaker);
+                $smartHome->addDevice($kitchenMainLight);
+                $smartHome->addDevice($kitchenPendantLights);
+                $smartHome->addDevice($kitchenRefrigerator);
+                $smartHome->addDevice($kitchenOven);
+                $smartHome->addDevice($kitchenCoffeeMaker);
+                $smartHome->addDevice($bedroomMainLight);
+                $smartHome->addDevice($bedroomNightstandLeft);
+                $smartHome->addDevice($bedroomNightstandRight);
+                $smartHome->addDevice($bedroomThermostat);
+                $smartHome->addDevice($bedroomTV);
+                $smartHome->addDevice($bedroomCeilingFan);
+                $smartHome->addDevice($bathroomMainLight);
+                $smartHome->addDevice($bathroomMirrorLight);
+                $smartHome->addDevice($bathroomExhaustFan);
+                $smartHome->addDevice($bathroomSmartScale);
+                return $smartHome;
+            },
+        ];
+    }
+    public function boot(
+        AgentRepositoryInterface $agents,
+    ): void {
+        /** @var SmartHomeControlAgent $agent */
+//        $agent = $agents->get(SmartHomeControlAgent::NAME);
+//
+//        $agent->addAssociation(new ToolLink(name: DynamicMemoryTool::NAME));
+    }
+}
+//app/src/Application/Bootloader
+namespace App\Application\Bootloader;
+use App\Application\AgentsLocator;
+use App\Application\ToolsLocator;
+use LLM\Agents\Agent\AgentRegistry;
+use LLM\Agents\Agent\AgentRegistryInterface;
+use LLM\Agents\Agent\AgentRepositoryInterface;
+use LLM\Agents\AgentExecutor\ExecutorInterface;
+use LLM\Agents\AgentExecutor\ExecutorPipeline;
+use LLM\Agents\AgentExecutor\Interceptor\GeneratePromptInterceptor;
+use LLM\Agents\AgentExecutor\Interceptor\InjectModelInterceptor;
+use LLM\Agents\AgentExecutor\Interceptor\InjectOptionsInterceptor;
+use LLM\Agents\AgentExecutor\Interceptor\InjectResponseIntoPromptInterceptor;
+use LLM\Agents\AgentExecutor\Interceptor\InjectToolsInterceptor;
+use LLM\Agents\ChainOfThought\ChainOfThoughtInterceptor;
+use LLM\Agents\JsonSchema\Mapper\SchemaMapper;
+use LLM\Agents\LLM\ContextFactoryInterface;
+use LLM\Agents\LLM\OptionsFactoryInterface;
+use LLM\Agents\OpenAI\Client\ContextFactory;
+use LLM\Agents\OpenAI\Client\OptionsFactory;
+use LLM\Agents\Tool\SchemaMapperInterface;
+use LLM\Agents\Tool\ToolRegistry;
+use LLM\Agents\Tool\ToolRegistryInterface;
+use LLM\Agents\Tool\ToolRepositoryInterface;
+use Spiral\Boot\Bootloader\Bootloader;
+use Spiral\Tokenizer\TokenizerListenerRegistryInterface;
+final class AgentsBootloader extends Bootloader
+{
+    public function defineSingletons(): array
+    {
+        return [
+            ToolRegistry::class => ToolRegistry::class,
+            ToolRegistryInterface::class => ToolRegistry::class,
+            ToolRepositoryInterface::class => ToolRegistry::class,
+            AgentRegistry::class => AgentRegistry::class,
+            AgentRegistryInterface::class => AgentRegistry::class,
+            AgentRepositoryInterface::class => AgentRegistry::class,
+            OptionsFactoryInterface::class => OptionsFactory::class,
+            ContextFactoryInterface::class => ContextFactory::class,
+            SchemaMapperInterface::class => SchemaMapper::class,
+            ExecutorInterface::class => static function (
+                ExecutorPipeline $pipeline,
+                // Interceptors
+                GeneratePromptInterceptor $generatePrompt,
+                InjectModelInterceptor $injectModel,
+                InjectToolsInterceptor $injectTools,
+                InjectOptionsInterceptor $injectOptions,
+                InjectResponseIntoPromptInterceptor $injectResponseIntoPrompt,
+                ChainOfThoughtInterceptor $chainOfThought,
+            ) {
+                return $pipeline->withInterceptor(
+                    $generatePrompt,
+                    $injectModel,
+                    $injectTools,
+                    $injectOptions,
+                    $chainOfThought,
+                    $injectResponseIntoPrompt,
+                );
+            },
+        ];
+    }
+    public function init(
+        TokenizerListenerRegistryInterface $listenerRegistry,
+        ToolsLocator $toolsLocator,
+        AgentsLocator $agentsLocator,
+    ): void {
+        $listenerRegistry->addListener($agentsLocator);
+        $listenerRegistry->addListener($toolsLocator);
+    }
+}
+//app/src/Application/Exception
+namespace App\Application\Exception;
+final class InvalidArgumentException extends \InvalidArgumentException
+{
+}
+//app/src/Application/Entity
+namespace App\Application\Entity;
+readonly class Json implements \JsonSerializable, \Stringable
+{
+    public static function fromString(string $value): static
+    {
+        return new static(\json_decode(json: $value, associative: true, flags: \JSON_THROW_ON_ERROR));
+    }
+    public function __construct(
+        public array|\JsonSerializable $data = [],
+    ) {}
+    /**
+     * Create from data storage raw value
+     */
+    final public static function typecast(mixed $value): static
+    {
+        if (empty($value)) {
+            return new static();
+        }
+        try {
+            return static::fromString((string) $value);
+        } catch (\JsonException $e) {
+            throw new \InvalidArgumentException($e->getMessage(), $e->getCode(), $e);
+        }
+    }
+    public function jsonSerialize(): array
+    {
+        return $this->data instanceof \JsonSerializable
+            ? $this->data->jsonSerialize()
+            : $this->data;
+    }
+    public function __toString(): string
+    {
+        return \json_encode($this);
+    }
+}
+//app/src/Application/Entity
+namespace App\Application\Entity;
+use Ramsey\Uuid\UuidInterface;
+final readonly class Uuid implements \Stringable, \JsonSerializable
+{
+    public static function generate(): self
+    {
+        return new self(\Ramsey\Uuid\Uuid::uuid7());
+    }
+    public static function fromString(string $uuid): self
+    {
+        return new self(\Ramsey\Uuid\Uuid::fromString($uuid));
+    }
+    public function __construct(
+        public UuidInterface $uuid,
+    ) {}
+    /** Create from data storage raw value */
+    final public static function typecast(mixed $value): self
+    {
+        return self::fromString($value);
+    }
+    public function equals(Uuid $uuid): bool
+    {
+        return $this->uuid->equals($uuid->uuid);
+    }
+    public function __toString(): string
+    {
+        return $this->uuid->toString();
+    }
+    public function jsonSerialize(): string
+    {
+        return $this->uuid->toString();
+    }
+}
+//app/src/Domain/Tool
+namespace App\Domain\Tool;
+use LLM\Agents\Agent\Execution;
+use LLM\Agents\AgentExecutor\ExecutionInput;
+use LLM\Agents\AgentExecutor\ExecutorInterceptorInterface;
+use LLM\Agents\AgentExecutor\InterceptorHandler;
+use LLM\Agents\LLM\Prompt\Chat\ToolCallResultMessage;
+use LLM\Agents\LLM\Response\ToolCall;
+use LLM\Agents\LLM\Response\ToolCalledResponse;
+use LLM\Agents\Tool\ToolExecutor;
+final readonly class ToolExecutorInterceptor implements ExecutorInterceptorInterface
+{
+    public function __construct(
+        private ToolExecutor $toolExecutor,
+    ) {}
+    public function execute(ExecutionInput $input, InterceptorHandler $next): Execution
+    {
+        $execution = $next($input);
+        while (true) {
+            $result = $execution->result;
+            $prompt = $execution->prompt;
+            if ($result instanceof ToolCalledResponse) {
+                // First, call all tools.
+                $toolsResponse = [];
+                foreach ($result->tools as $tool) {
+                    $toolsResponse[] = $this->callTool($tool);
+                }
+                // Then add the tools responses to the prompt.
+                foreach ($toolsResponse as $toolResponse) {
+                    $input = $input->withPrompt($prompt->withAddedMessage($toolResponse));
+                }
+                $execution = $next($input);
+                continue;
+            }
+            return $execution;
+        }
+    }
+    private function callTool(ToolCall $tool): ToolCallResultMessage
+    {
+        $functionResult = $this->toolExecutor->execute($tool->name, $tool->arguments);
+        return new ToolCallResultMessage(
+            id: $tool->id,
+            content: [$functionResult],
+        );
+    }
+}
+//app/src/Domain/Chat
+namespace App\Domain\Chat;
+use LLM\Agents\Chat\Exception\SessionNotFoundException;
+use LLM\Agents\Chat\SessionInterface;
+use Ramsey\Uuid\UuidInterface;
+interface SessionRepositoryInterface
+{
+    public function forUpdate(): static;
+    /**
+     * Find a session by its UUID.
+     * This method is useful for retrieving a specific session.
+     */
+    public function findByUuid(UuidInterface $uuid): ?SessionInterface;
+    /**
+     * Get a session by its UUID.
+     * This method is useful for retrieving a specific session.
+     *
+     * @throws SessionNotFoundException
+     */
+    public function getByUuid(UuidInterface $uuid): SessionInterface;
+}
+//app/src/Domain/Chat
+namespace App\Domain\Chat;
+use App\Agents\DynamicMemoryTool\DynamicMemoryService;
+use App\Application\Entity\Uuid;
+use LLM\Agents\Agent\AgentRepositoryInterface;
+use LLM\Agents\Agent\Exception\AgentNotFoundException;
+use LLM\Agents\Agent\Execution;
+use LLM\Agents\Chat\AgentExecutorBuilder;
+use LLM\Agents\Chat\ChatServiceInterface;
+use LLM\Agents\Chat\Exception\ChatNotFoundException;
+use LLM\Agents\Chat\SessionInterface;
+use LLM\Agents\Chat\StreamChunkCallback;
+use LLM\Agents\LLM\Prompt\Chat\Prompt;
+use LLM\Agents\LLM\Prompt\Chat\ToolCallResultMessage;
+use LLM\Agents\LLM\Response\ChatResponse;
+use LLM\Agents\LLM\Response\ToolCall;
+use LLM\Agents\LLM\Response\ToolCalledResponse;
+use LLM\Agents\PromptGenerator\Context;
+use LLM\Agents\Solution\SolutionMetadata;
+use LLM\Agents\Tool\ToolExecutor;
+use Psr\EventDispatcher\EventDispatcherInterface;
+use Ramsey\Uuid\UuidInterface;
+final readonly class SimpleChatService implements ChatServiceInterface
+{
+    public function __construct(
+        private AgentExecutorBuilder $builder,
+        private SessionRepositoryInterface $sessions,
+        private EntityManagerInterface $em,
+        private AgentRepositoryInterface $agents,
+        private ToolExecutor $toolExecutor,
+        private DynamicMemoryService $memoryService,
+        private ?EventDispatcherInterface $eventDispatcher = null,
+    ) {}
+    public function getSession(UuidInterface $sessionUuid): SessionInterface
+    {
+        $session = $this->sessions->forUpdate()->getByUuid($sessionUuid);
+        if ($session->isFinished()) {
+            throw new ChatNotFoundException('Session is finished');
+        }
+        return $session;
+    }
+    public function startSession(UuidInterface $accountUuid, string $agentName): UuidInterface
+    {
+        if (!$this->agents->has($agentName)) {
+            throw new AgentNotFoundException($agentName);
+        }
+        $agent = $this->agents->get($agentName);
+        $session = new Session(
+            uuid: Uuid::generate(),
+            accountUuid: new Uuid($accountUuid),
+            agentName: $agentName,
+        );
+        // Set the title of the session to the agent's description.
+        $session->title = $agent->getDescription();
+        $this->updateSession($session);
+        return $session->uuid->uuid;
+    }
+    public function ask(UuidInterface $sessionUuid, string|\Stringable $message): UuidInterface
+    {
+        $session = $this->getSession($sessionUuid);
+        $prompt = null;
+        if (!$session->history->isEmpty()) {
+            $prompt = $session->history->toPrompt();
+        }
+        $messageUuid = Uuid::generate();
+        $this->eventDispatcher->dispatch(
+            new \LLM\Agents\Chat\Event\Question(
+                sessionUuid: $session->uuid->uuid,
+                messageUuid: $messageUuid->uuid,
+                createdAt: new \DateTimeImmutable(),
+                message: $message,
+            ),
+        );
+        $execution = $this->buildAgent(
+            session: $session,
+            prompt: $prompt,
+        )->ask($message);
+        $this->handleResult($execution, $session);
+        return $messageUuid->uuid;
+    }
+    public function closeSession(UuidInterface $sessionUuid): void
+    {
+        $session = $this->getSession($sessionUuid);
+        $session->finishedAt = new \DateTimeImmutable();
+        $this->updateSession($session);
+    }
+    public function updateSession(SessionInterface $session): void
+    {
+        $this->em->persist($session)->flush();
+    }
+    private function handleResult(Execution $execution, Session $session): void
+    {
+        $finished = false;
+        while (true) {
+            $result = $execution->result;
+            $prompt = $execution->prompt;
+            if ($result instanceof ToolCalledResponse) {
+                // First, call all tools.
+                $toolsResponse = [];
+                foreach ($result->tools as $tool) {
+                    $toolsResponse[] = $this->callTool($session, $tool);
+                }
+                // Then add the tools responses to the prompt.
+                foreach ($toolsResponse as $toolResponse) {
+                    $prompt = $prompt->withAddedMessage($toolResponse);
+                }
+                $execution = $this->buildAgent(
+                    session: $session,
+                    prompt: $prompt,
+                )->continue();
+            } elseif ($result instanceof ChatResponse) {
+                $finished = true;
+                $this->eventDispatcher->dispatch(
+                    new \LLM\Agents\Chat\Event\Message(
+                        sessionUuid: $session->uuid->uuid,
+                        createdAt: new \DateTimeImmutable(),
+                        message: $result->content,
+                    ),
+                );
+            }
+            $session->updateHistory($prompt->toArray());
+            $this->updateSession($session);
+            if ($finished) {
+                break;
+            }
+        }
+    }
+    private function buildAgent(Session $session, ?Prompt $prompt): AgentExecutorBuilder
+    {
+        $context = new Context();
+        $context->setAuthContext([
+            'account_uuid' => (string) $session->accountUuid,
+            'session_uuid' => (string) $session->uuid,
+        ]);
+        $agent = $this->builder
+            ->withAgentKey($session->agentName)
+            ->withStreamChunkCallback(
+                new StreamChunkCallback(
+                    sessionUuid: $session->uuid->uuid,
+                    eventDispatcher: $this->eventDispatcher,
+                ),
+            )
+            ->withPromptContext($context);
+        if ($prompt === null) {
+            return $agent;
+        }
+        $memories = $this->memoryService->getCurrentMemory($session->uuid);
+        return $agent->withPrompt($prompt->withValues([
+            'dynamic_memory' => \implode(
+                "\n",
+                \array_map(
+                    fn(SolutionMetadata $memory) => $memory->content,
+                    $memories->memories,
+                ),
+            ),
+        ]));
+    }
+    private function callTool(Session $session, ToolCall $tool): ToolCallResultMessage
+    {
+        $this->eventDispatcher->dispatch(
+            new \LLM\Agents\Chat\Event\ToolCall(
+                sessionUuid: $session->uuid->uuid,
+                id: $tool->id,
+                tool: $tool->name,
+                arguments: $tool->arguments,
+                createdAt: new \DateTimeImmutable(),
+            ),
+        );
+        $functionResult = $this->toolExecutor->execute($tool->name, $tool->arguments);
+        $this->eventDispatcher->dispatch(
+            new \LLM\Agents\Chat\Event\ToolCallResult(
+                sessionUuid: $session->uuid->uuid,
+                id: $tool->id,
+                tool: $tool->name,
+                result: $functionResult,
+                createdAt: new \DateTimeImmutable(),
+            ),
+        );
+        return new ToolCallResultMessage(
+            id: $tool->id,
+            content: [$functionResult],
+        );
+    }
+}
+//app/src/Domain/Chat
+namespace App\Domain\Chat;
+use App\Application\Entity\Json;
+use LLM\Agents\LLM\Prompt\Chat\Prompt;
+use LLM\Agents\LLM\Prompt\MessageInterface;
+use Traversable;
+final readonly class History extends Json implements \IteratorAggregate
+{
+    /**
+     * @return Traversable<MessageInterface>
+     */
+    public function getIterator(): Traversable
+    {
+        return new \ArrayIterator(
+            $this->toPrompt()->getMessages(),
+        );
+    }
+    public function isEmpty(): bool
+    {
+        return $this->data === [];
+    }
+    public function toPrompt(): Prompt
+    {
+        return Prompt::fromArray($this->data);
+    }
+}
+//app/src/Domain/Chat
+namespace App\Domain\Chat;
+use App\Application\Entity\Uuid;
+use App\Infrastructure\CycleOrm\Repository\SessionRepository;
+use App\Infrastructure\CycleOrm\Table\SessionTable;
+use Cycle\Annotated\Annotation\Column;
+use Cycle\Annotated\Annotation\Entity;
+use Cycle\ORM\Entity\Behavior;
+use LLM\Agents\Chat\SessionInterface;
+use Ramsey\Uuid\UuidInterface;
+#[Entity(
+    role: Session::ROLE,
+    repository: SessionRepository::class,
+    table: SessionTable::TABLE_NAME
+)]
+#[Behavior\CreatedAt(field: 'createdAt', column: SessionTable::CREATED_AT)]
+#[Behavior\UpdatedAt(field: 'updatedAt', column: SessionTable::UPDATED_AT)]
+class Session implements SessionInterface
+{
+    public const ROLE = 'chat_session';
+    public const F_UUID = 'uuid';
+    public const F_ACCOUNT_UUID = 'accountUuid';
+    public const F_AGENT_NAME = 'agentName';
+    public const F_TITLE = 'title';
+    public const F_HISTORY = 'history';
+    public const F_CREATED_AT = 'createdAt';
+    public const F_UPDATED_AT = 'updatedAt';
+    public const F_FINISHED_AT = 'finishedAt';
+    #[Column(type: 'string', name: SessionTable::TITLE, nullable: true, default: null)]
+    public ?string $title = null;
+    #[Column(type: 'json', name: SessionTable::HISTORY, typecast: History::class)]
+    public History $history;
+    public \DateTimeInterface $createdAt;
+    public ?\DateTimeInterface $updatedAt = null;
+    #[Column(type: 'datetime', name: SessionTable::FINISHED_AT, nullable: true, default: null)]
+    public ?\DateTimeInterface $finishedAt = null;
+    public function __construct(
+        #[Column(type: 'uuid', name: SessionTable::UUID, primary: true, typecast: Uuid::class)]
+        public Uuid $uuid,
+        #[Column(type: 'uuid', name: SessionTable::ACCOUNT_UUID, typecast: Uuid::class)]
+        public Uuid $accountUuid,
+        #[Column(type: 'string', name: SessionTable::AGENT_NAME)]
+        public string $agentName,
+    ) {
+        $now = new \DateTimeImmutable();
+        $this->createdAt = $now;
+        $this->updatedAt = $now;
+        $this->updateHistory([]);
+    }
+    public function updateHistory(array $messages): void
+    {
+        $this->history = new History($messages);
+    }
+    public function isFinished(): bool
+    {
+        return $this->finishedAt !== null;
+    }
+    public function getUuid(): UuidInterface
+    {
+        return $this->uuid->uuid;
+    }
+    public function getAgentName(): string
+    {
+        return $this->agentName;
+    }
+}
+//app/src/Domain/Chat/PromptGenerator
+namespace App\Domain\Chat\PromptGenerator;
+use LLM\Agents\LLM\Prompt\Chat\MessagePrompt;
+use LLM\Agents\LLM\Prompt\Chat\Prompt;
+use LLM\Agents\LLM\Prompt\Chat\PromptInterface;
+use LLM\Agents\PromptGenerator\Context;
+use LLM\Agents\PromptGenerator\InterceptorHandler;
+use LLM\Agents\PromptGenerator\PromptGeneratorInput;
+use LLM\Agents\PromptGenerator\PromptInterceptorInterface;
+final class SessionContextInjector implements PromptInterceptorInterface
+{
+    public function generate(
+        PromptGeneratorInput $input,
+        InterceptorHandler $next,
+    ): PromptInterface {
+        \assert($input->prompt instanceof Prompt);
+        if (
+            (!$input->context instanceof Context)
+            || $input->context->getAuthContext() === null
+        ) {
+            return $next($input);
+        }
+        return $next(
+            input: $input->withPrompt(
+                $input->prompt
+                    ->withAddedMessage(
+                        MessagePrompt::system(
+                            prompt: 'Session context: {active_context}',
+                        ),
+                    )->withValues(
+                        values: [
+                            'active_context' => \json_encode($input->context->getAuthContext()),
+                        ],
+                    ),
+            ),
+        );
+    }
+}
+//app/src/Domain/Chat/PromptGenerator
+namespace App\Domain\Chat\PromptGenerator;
+use LLM\Agents\LLM\Prompt\Chat\PromptInterface;
+use LLM\Agents\PromptGenerator\InterceptorHandler;
+use LLM\Agents\PromptGenerator\PromptGeneratorInput;
+use LLM\Agents\PromptGenerator\PromptInterceptorInterface;
+final class Dump implements PromptInterceptorInterface
+{
+    public function generate(
+        PromptGeneratorInput $input,
+        InterceptorHandler $next,
+    ): PromptInterface {
+        dump($input->prompt->format());
+        return $next($input);
+    }
+}
+//app/src/Domain/Chat
+namespace App\Domain\Chat;
+use LLM\Agents\Chat\SessionInterface;
+interface EntityManagerInterface
+{
+    public function persist(SessionInterface ...$entities): self;
+    public function delete(SessionInterface ...$entities): self;
+    public function flush(): void;
+}
+//app/src/Infrastructure/CycleOrm/Repository
+namespace App\Infrastructure\CycleOrm\Repository;
+use App\Domain\Chat\Session;
+use App\Domain\Chat\SessionRepositoryInterface;
+use Cycle\ORM\Select\Repository;
+use LLM\Agents\Chat\Exception\SessionNotFoundException;
+use LLM\Agents\Chat\SessionInterface;
+use Ramsey\Uuid\UuidInterface;
+/**
+ * @extends Repository<Session>
+ */
+final class SessionRepository extends Repository implements SessionRepositoryInterface
+{
+    public const ROLE = Session::ROLE;
+    public function findByUuid(UuidInterface $uuid): ?SessionInterface
+    {
+        return $this->findByPK($uuid);
+    }
+    public function getByUuid(UuidInterface $uuid): SessionInterface
+    {
+        $session = $this->findByUuid($uuid);
+        if ($session === null) {
+            throw new SessionNotFoundException(\sprintf('Session with UUID %s not found', $uuid));
+        }
+        return $session;
+    }
+}
+//app/src/Infrastructure/CycleOrm/Table
+namespace App\Infrastructure\CycleOrm\Table;
+final class SessionTable
+{
+    public const TABLE_NAME = 'chat_sessions';
+    public const UUID = 'uuid';
+    public const ACCOUNT_UUID = 'account_uuid';
+    public const AGENT_NAME = 'agent_name';
+    public const TITLE = 'title';
+    public const HISTORY = 'history';
+    public const CREATED_AT = 'created_at';
+    public const UPDATED_AT = 'updated_at';
+    public const FINISHED_AT = 'finished_at';
+}
+//app/src/Infrastructure/CycleOrm/Entity
+namespace App\Infrastructure\CycleOrm\Entity;
+use App\Domain\Chat\EntityManagerInterface;
+use LLM\Agents\Chat\SessionInterface;
+final readonly class SessionEntityManager implements EntityManagerInterface
+{
+    public function __construct(
+        private \Cycle\ORM\EntityManagerInterface $em,
+    ) {}
+    public function persist(SessionInterface ...$entities): self
+    {
+        foreach ($entities as $entity) {
+            $this->em->persist($entity);
+        }
+        return $this;
+    }
+    public function delete(SessionInterface ...$entities): self
+    {
+        foreach ($entities as $entity) {
+            $this->em->delete($entity);
+        }
+        return $this;
+    }
+    public function flush(): void
+    {
+        $this->em->run();
+    }
+}
+//app/src/Infrastructure/RoadRunner/SmartHome
+namespace App\Infrastructure\RoadRunner\SmartHome;
+use Carbon\CarbonInterval;
+use LLM\Agents\Agent\SmartHomeControl\SmartHome\Devices\SmartDevice;
+use LLM\Agents\Agent\SmartHomeControl\SmartHome\DeviceStateRepositoryInterface;
+use LLM\Agents\Agent\SmartHomeControl\SmartHome\DeviceStateStorageInterface;
+use Psr\SimpleCache\CacheInterface;
+use Spiral\Core\Attribute\Singleton;
+#[Singleton]
+final readonly class DeviceStateManager implements DeviceStateStorageInterface, DeviceStateRepositoryInterface
+{
+    private const DEVICE_STATE_TTL = 3600;
+    private const LAST_ACTION_TTL = 3600;
+    private const LAST_ACTION_KEY = 'last_action';
+    public function __construct(
+        private CacheInterface $cache,
+    ) {}
+    public function getDevice(string $id): ?SmartDevice
+    {
+        return $this->cache->get('device_' . $id);
+    }
+    public function update(SmartDevice $device): void
+    {
+        $this->cache->set(
+            'device_' . $device->id,
+            $device,
+            CarbonInterval::seconds(self::DEVICE_STATE_TTL),
+        );
+        $this->cache->set(self::LAST_ACTION_KEY, \time(), CarbonInterval::seconds(self::LAST_ACTION_TTL));
+    }
+    public function getLastActionTime(): ?int
+    {
+        return $this->cache->get(self::LAST_ACTION_KEY) ?? null;
+    }
+}
+//app/src/Infrastructure/RoadRunner/Chat
+namespace App\Infrastructure\RoadRunner\Chat;
+use LLM\Agents\Chat\ChatHistoryRepositoryInterface;
+use LLM\Agents\Chat\Event\Message;
+use LLM\Agents\Chat\Event\Question;
+use LLM\Agents\Chat\Event\ToolCall;
+use LLM\Agents\Chat\Event\ToolCallResult;
+use Spiral\Events\Attribute\Listener;
+final readonly class ChatEventsListener
+{
+    public function __construct(
+        private ChatHistoryRepositoryInterface $history,
+    ) {}
+    #[Listener]
+    public function listenToolCall(ToolCall $message): void
+    {
+        $this->history->addMessage($message->sessionUuid, $message);
+    }
+    #[Listener]
+    public function listenMessage(Message $message): void
+    {
+        $this->history->addMessage($message->sessionUuid, $message);
+    }
+    #[Listener]
+    public function listenQuestion(Question $message): void
+    {
+        $this->history->addMessage($message->sessionUuid, $message);
+    }
+    #[Listener]
+    public function listenToolCallResult(ToolCallResult $message): void
+    {
+        $this->history->addMessage($message->sessionUuid, $message);
+    }
+}
+//app/src/Infrastructure/RoadRunner/Chat
+namespace App\Infrastructure\RoadRunner\Chat;
+use LLM\Agents\Chat\ChatHistoryRepositoryInterface;
+use Psr\SimpleCache\CacheInterface;
+use Ramsey\Uuid\UuidInterface;
+final readonly class ChatHistoryRepository implements ChatHistoryRepositoryInterface
+{
+    public function __construct(
+        private CacheInterface $cache,
+    ) {}
+    public function getMessages(UuidInterface $sessionUuid): iterable
+    {
+        $messages = (array) $this->cache->get((string) $sessionUuid);
+        foreach ($messages as $message) {
+            yield $message;
+        }
+    }
+    public function addMessage(UuidInterface $sessionUuid, object $message): void
+    {
+        $messages = (array) $this->cache->get((string) $sessionUuid);
+        $messages[] = $message;
+        $this->cache->set((string) $sessionUuid, $messages);
+    }
+    public function clear(UuidInterface $sessionUuid): void
+    {
+        $this->cache->delete((string) $sessionUuid);
+    }
+}
