@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Application\Bootloader;
 
 use App\Application\AgentsLocator;
+use App\Application\PythonExecutor;
 use App\Application\ToolsLocator;
 use LLM\Agents\Agent\AgentRegistry;
 use LLM\Agents\Agent\AgentRegistryInterface;
@@ -22,6 +23,8 @@ use LLM\Agents\LLM\OptionsFactoryInterface;
 use LLM\Agents\OpenAI\Client\ContextFactory;
 use LLM\Agents\OpenAI\Client\OptionsFactory;
 use LLM\Agents\Tool\SchemaMapperInterface;
+use LLM\Agents\Tool\ToolExecutor;
+use LLM\Agents\Tool\ToolLanguage;
 use LLM\Agents\Tool\ToolRegistry;
 use LLM\Agents\Tool\ToolRegistryInterface;
 use LLM\Agents\Tool\ToolRepositoryInterface;
@@ -36,6 +39,8 @@ final class AgentsBootloader extends Bootloader
             ToolRegistry::class => ToolRegistry::class,
             ToolRegistryInterface::class => ToolRegistry::class,
             ToolRepositoryInterface::class => ToolRegistry::class,
+
+            ToolExecutor::class => ToolExecutor::class,
 
             AgentRegistry::class => AgentRegistry::class,
             AgentRegistryInterface::class => AgentRegistry::class,
@@ -71,7 +76,11 @@ final class AgentsBootloader extends Bootloader
         TokenizerListenerRegistryInterface $listenerRegistry,
         ToolsLocator $toolsLocator,
         AgentsLocator $agentsLocator,
+        ToolExecutor $toolExecutor,
+        PythonExecutor $pythonExecutor,
     ): void {
+        $toolExecutor->register(ToolLanguage::Python, $pythonExecutor);
+
         $listenerRegistry->addListener($agentsLocator);
         $listenerRegistry->addListener($toolsLocator);
     }
